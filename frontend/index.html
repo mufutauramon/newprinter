@@ -1,0 +1,12 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>RemotePrint NG – Fresh Start</title>
+</head>
+<body>
+  <h1>RemotePrint NG</h1>
+  <button onclick="fetch('/api/ping').then(r=>r.json()).then(console.log)">Ping API</button>
+  <button onclick="fetch('/api/dbcheck').then(r=>r.json()).then(console.log)">DB Check</button>
+</body>
+</html>
