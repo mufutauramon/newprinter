@@ -8,5 +8,21 @@
   <h1>RemotePrint NG</h1>
   <button onclick="fetch('/api/ping').then(r=>r.json()).then(console.log)">Ping API</button>
   <button onclick="fetch('/api/dbcheck').then(r=>r.json()).then(console.log)">DB Check</button>
+
+  <button id="btnSignup">Sign up test</button>
+<script>
+document.getElementById('btnSignup').onclick = async () => {
+  const email = prompt('Email:', 'owner@remoteprint.ng');
+  const password = prompt('Password:', 'Pass123!');
+  const res = await fetch('/api/auth/signup', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ email, password })
+  });
+  const data = await res.json().catch(()=> ({}));
+  alert('Status ' + res.status + '\\n' + JSON.stringify(data, null, 2));
+};
+</script>
+
 </body>
 </html>
