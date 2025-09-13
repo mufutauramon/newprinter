@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  say_hello:
+  hello:
     runs-on: ubuntu-latest
     steps:
-      - run: echo "Hello from GitHub Actions. Commit: $GITHUB_SHA"
+      - run: echo "Hello from $GITHUB_REPOSITORY @ $GITHUB_SHA"
