@@ -31,4 +31,10 @@ export default async function (context, req) {
     context.log.error("SIGNUP ERROR:", e);
     context.res = { status: 500, headers:{'Content-Type':'application/json'}, body:{ error: String(e) } };
   }
+  context.log.error("SIGNUP ERROR:", e);
+  context.res = {
+    status: 500,
+    headers: { "Content-Type": "application/json" },
+    body: { error: e.message || String(e) }
+  };
 }
