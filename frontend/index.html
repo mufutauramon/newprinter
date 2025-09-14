@@ -6,6 +6,21 @@
   <title>RemotePrint NG – SWA</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
+  <style>
+#toast {
+  position: fixed; right: 16px; top: 16px; z-index: 9999; 
+  max-width: 90vw; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+}
+.toast {
+  margin-bottom: 8px; padding: 12px 14px; border-radius: 8px; 
+  box-shadow: 0 6px 16px rgba(0,0,0,.15); color: #111; background: #fff;
+  border-left: 6px solid #888; transition: opacity .2s ease;
+}
+.toast.success { border-left-color: #16a34a; }
+.toast.error   { border-left-color: #dc2626; }
+.toast.info    { border-left-color: #2563eb; }
+.toast .title { font-weight: 600; margin-right: 8px; }
+</style>
 </head>
 <body>
   <div class="wrap">
@@ -113,6 +128,7 @@
     <footer class="center small">© RemotePrint NG – SWA demo.</footer>
   </div>
   <script src="script.js"></script>
+  <div id="toast"></div>
 </body>
 </html>
 

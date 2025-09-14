@@ -126,3 +126,77 @@ $('#sendBtn').addEventListener('click', async()=>{
 });
 
 getMe();
+
+
+function showToast(message, type="info") {
+  const wrap = document.getElementById('toast');
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.innerHTML = `<span class="title">${type.toUpperCase()}</span> ${message}`;
+  wrap.appendChild(el);
+  setTimeout(()=>{ el.style.opacity = '0'; }, 2600);
+  setTimeout(()=>{ wrap.removeChild(el); }, 3000);
+}
+
+// Generic JSON fetch helper
+async function callJson(url, options={}) {
+  const res = await fetch(url, {
+    ...options,
+    headers: { 'Content-Type': 'application/json', ...(options.headers||{}) }
+  });
+  const text = await res.text();
+  let data;
+  try { data = text ? JSON.parse(text) : {}; } catch { data = { raw:text }; }
+  return { ok: res.ok, status: res.status, data };
+}
+
+// Hook up to your form/buttons:
+// Example minimal handlers (adjust selectors to match your page)
+async function handleSignup(email, password) {
+  const { ok, status, data } = await callJson('/api/auth/signup', {
+    method: 'POST',
+    body: JSON.stringify({ email, password })
+  });
+  if (ok) {
+    showToast('Account created', 'success');
+    if (data.token) localStorage.setItem('rp_token', data.token);
+  } else if (status === 409) {
+    showToast('Email already exists', 'error');
+  } else {
+    showToast(`Signup failed (${status})`, 'error');
+    console.error('signup error', data);
+  }
+}
+
+async function handleSignin(email, password) {
+  const { ok, status, data } = await callJson('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ email, password })
+  });
+  if (ok) {
+    localStorage.setItem('rp_token', data.token);
+    showToast('Signed in', 'success');
+    // navigate/update UI
+  } else if (status === 401) {
+    showToast('Invalid email/password', 'error');
+  } else {
+    showToast(`Signin failed (${status})`, 'error');
+    console.error('login error', data);
+  }
+}
+
+// Example: wire to simple prompts or real form
+window.rpSignupPrompt = async () => {
+  const email = prompt('Email:');
+  const pwd = prompt('Password:');
+  if (!email || !pwd) return;
+  await handleSignup(email, pwd);
+};
+window.rpSigninPrompt = async () => {
+  const email = prompt('Email:');
+  const pwd = prompt('Password:');
+  if (!email || !pwd) return;
+  await handleSignin(email, pwd);
+};
+
+
