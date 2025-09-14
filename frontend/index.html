@@ -6,21 +6,21 @@
   <title>RemotePrint NG – SWA</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
+
+  <!-- Toasts (single) -->
   <style>
-#toast {
-  position: fixed; right: 16px; top: 16px; z-index: 9999; 
-  max-width: 90vw; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-}
-.toast {
-  margin-bottom: 8px; padding: 12px 14px; border-radius: 8px; 
-  box-shadow: 0 6px 16px rgba(0,0,0,.15); color: #111; background: #fff;
-  border-left: 6px solid #888; transition: opacity .2s ease;
-}
-.toast.success { border-left-color: #16a34a; }
-.toast.error   { border-left-color: #dc2626; }
-.toast.info    { border-left-color: #2563eb; }
-.toast .title { font-weight: 600; margin-right: 8px; }
-</style>
+    #toast { position: fixed; right: 16px; top: 16px; z-index: 9999; max-width: 90vw; }
+    .toast { margin: 8px 0; padding: 12px 14px; border-radius: 8px; background: #fff; color:#111;
+      border-left: 6px solid #888; box-shadow: 0 6px 16px rgba(0,0,0,.15); }
+    .toast.success { border-left-color:#16a34a; }
+    .toast.error   { border-left-color:#dc2626; }
+    .toast.info    { border-left-color:#2563eb; }
+    dialog.modal { border: none; border-radius: 12px; padding: 0; max-width: 420px; width: 92vw; }
+    .modal .body { padding: 20px; }
+    .modal header { padding: 16px 20px; border-bottom: 1px solid #1f2937; display:flex; align-items:center; justify-content:space-between;}
+    .modal footer { padding: 14px 20px; border-top: 1px solid #1f2937; display:flex; gap:8px; justify-content:flex-end;}
+    .hidden { display: none !important; }
+  </style>
 </head>
 <body>
   <div class="wrap">
@@ -39,6 +39,7 @@
     </header>
 
     <section class="grid" id="authSection">
+      <!-- Auth Card -->
       <div class="card">
         <h3>Sign in / Create account</h3>
         <div class="stack">
@@ -55,13 +56,23 @@
         </div>
       </div>
 
+      <!-- Plans Card -->
       <div class="card">
         <h3>Choose a subscription</h3>
         <p class="muted small">Plans map to monthly print quotas.</p>
         <div class="plans">
-          <label class="plan"><input type="radio" name="plan" value="Basic" checked><h4>Basic</h4><div class="price">₦ 2,000</div><div class="badge">100 B/W pages</div></label>
-          <label class="plan"><input type="radio" name="plan" value="Standard"><h4>Standard</h4><div class="price">₦ 4,000</div><div class="badge">250 B/W pages</div></label>
-          <label class="plan"><input type="radio" name="plan" value="Pro"><h4>Pro</h4><div class="price">₦ 8,000</div><div class="badge">600 B/W pages</div></label>
+          <label class="plan">
+            <input type="radio" name="plan" value="Basic" checked>
+            <h4>Basic</h4><div class="price">₦ 2,000</div><div class="badge">100 B/W pages</div>
+          </label>
+          <label class="plan">
+            <input type="radio" name="plan" value="Standard">
+            <h4>Standard</h4><div class="price">₦ 4,000</div><div class="badge">250 B/W pages</div>
+          </label>
+          <label class="plan">
+            <input type="radio" name="plan" value="Pro">
+            <h4>Pro</h4><div class="price">₦ 8,000</div><div class="badge">600 B/W pages</div>
+          </label>
         </div>
         <div class="row" style="margin-top:10px">
           <button id="subscribeBtn" class="btn">Subscribe / Update plan</button>
@@ -69,6 +80,7 @@
       </div>
     </section>
 
+    <!-- Dashboard (unchanged) -->
     <section id="dash" class="hidden">
       <div class="grid">
         <div class="card">
@@ -127,57 +139,35 @@
 
     <footer class="center small">© RemotePrint NG – SWA demo.</footer>
   </div>
-  <script src="script.js"></script>
+
+  <!-- Signup modal -->
+  <dialog id="signupModal" class="modal">
+    <header>
+      <strong>Create account</strong>
+      <button type="button" id="signupClose" class="btn secondary small">Close</button>
+    </header>
+    <div class="body">
+      <div class="stack">
+        <label>Full name
+          <input id="suFullName" type="text" placeholder="Jane Doe" required>
+        </label>
+        <label>Phone (e.g., +2348012345678)
+          <input id="suPhone" type="tel" placeholder="+234..." required>
+        </label>
+        <div class="row">
+          <div class="small muted">Selected plan:</div>
+          <div id="suPlan" class="pill">Basic</div>
+        </div>
+        <p class="small muted">Your email and password are taken from the fields in the left card.</p>
+      </div>
+    </div>
+    <footer>
+      <button id="signupCancel" class="btn secondary" type="button">Cancel</button>
+      <button id="signupSubmit" class="btn" type="button">Create account</button>
+    </footer>
+  </dialog>
+
   <div id="toast"></div>
-
-  <!-- Add once in your page (e.g., index.html) -->
-<style>
-#toast{position:fixed;right:16px;top:16px;z-index:9999}
-.toast{margin:8px 0;padding:12px 14px;border-radius:8px;background:#fff;border-left:6px solid #888;box-shadow:0 6px 16px rgba(0,0,0,.15)}
-.toast.success{border-left-color:#16a34a}.toast.error{border-left-color:#dc2626}
-</style>
-<div id="toast"></div>
-<script>
-const tWrap=()=>document.getElementById('toast');
-function toast(msg,type='success'){
-  const el=document.createElement('div'); el.className=`toast ${type}`; el.textContent=msg;
-  tWrap().appendChild(el); setTimeout(()=>el.remove(),3000);
-}
-async function postJson(url,body){
-  const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  const txt=await r.text(); let data={}; try{data=txt?JSON.parse(txt):{}}catch{data={raw:txt}}
-  return {ok:r.ok,status:r.status,data};
-}
-
-// Demo prompts — replace with your real form submit handlers:
-window.signupPrompt = async ()=>{
-  const fullName = prompt('Full name:'); if(!fullName) return;
-  const phone    = prompt('Phone (e.g., +2348012345678):'); if(!phone) return;
-  const email    = prompt('Email:'); if(!email) return;
-  const password = prompt('Password (min 6 chars):'); if(!password) return;
-
-  const {ok,status,data}=await postJson('/api/auth/signup',{fullName,phone,email,password});
-  if(ok){ localStorage.setItem('rp_token',data.token||''); toast('Signup successful','success'); }
-  else if(status===409){ toast('Email already exists','error'); }
-  else{ toast(`Signup failed (${status})`,'error'); console.error(data); }
-};
-
-window.loginPrompt = async ()=>{
-  const email    = prompt('Email:'); if(!email) return;
-  const password = prompt('Password:'); if(!password) return;
-
-  const {ok,status,data}=await postJson('/api/auth/login',{email,password});
-  if(ok){ localStorage.setItem('rp_token',data.token||''); toast('Signed in','success'); }
-  else if(status===401){ toast('Invalid email/password','error'); }
-  else{ toast(`Login failed (${status})`,'error'); console.error(data); }
-};
-</script>
-
-<!-- Temporary buttons to test quickly -->
-<button onclick="signupPrompt()">Sign up</button>
-<button onclick="loginPrompt()">Sign in</button>
-
+  <script src="script.js"></script>
 </body>
 </html>
-
-
