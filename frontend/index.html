@@ -129,6 +129,54 @@
   </div>
   <script src="script.js"></script>
   <div id="toast"></div>
+
+  <!-- Add once in your page (e.g., index.html) -->
+<style>
+#toast{position:fixed;right:16px;top:16px;z-index:9999}
+.toast{margin:8px 0;padding:12px 14px;border-radius:8px;background:#fff;border-left:6px solid #888;box-shadow:0 6px 16px rgba(0,0,0,.15)}
+.toast.success{border-left-color:#16a34a}.toast.error{border-left-color:#dc2626}
+</style>
+<div id="toast"></div>
+<script>
+const tWrap=()=>document.getElementById('toast');
+function toast(msg,type='success'){
+  const el=document.createElement('div'); el.className=`toast ${type}`; el.textContent=msg;
+  tWrap().appendChild(el); setTimeout(()=>el.remove(),3000);
+}
+async function postJson(url,body){
+  const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const txt=await r.text(); let data={}; try{data=txt?JSON.parse(txt):{}}catch{data={raw:txt}}
+  return {ok:r.ok,status:r.status,data};
+}
+
+// Demo prompts — replace with your real form submit handlers:
+window.signupPrompt = async ()=>{
+  const fullName = prompt('Full name:'); if(!fullName) return;
+  const phone    = prompt('Phone (e.g., +2348012345678):'); if(!phone) return;
+  const email    = prompt('Email:'); if(!email) return;
+  const password = prompt('Password (min 6 chars):'); if(!password) return;
+
+  const {ok,status,data}=await postJson('/api/auth/signup',{fullName,phone,email,password});
+  if(ok){ localStorage.setItem('rp_token',data.token||''); toast('Signup successful','success'); }
+  else if(status===409){ toast('Email already exists','error'); }
+  else{ toast(`Signup failed (${status})`,'error'); console.error(data); }
+};
+
+window.loginPrompt = async ()=>{
+  const email    = prompt('Email:'); if(!email) return;
+  const password = prompt('Password:'); if(!password) return;
+
+  const {ok,status,data}=await postJson('/api/auth/login',{email,password});
+  if(ok){ localStorage.setItem('rp_token',data.token||''); toast('Signed in','success'); }
+  else if(status===401){ toast('Invalid email/password','error'); }
+  else{ toast(`Login failed (${status})`,'error'); console.error(data); }
+};
+</script>
+
+<!-- Temporary buttons to test quickly -->
+<button onclick="signupPrompt()">Sign up</button>
+<button onclick="loginPrompt()">Sign in</button>
+
 </body>
 </html>
 
