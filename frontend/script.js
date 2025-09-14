@@ -77,12 +77,12 @@ signupClose.addEventListener("click", () => signupModal.close());
 signupCancel.addEventListener("click", () => signupModal.close());
 
 signupSubmit.addEventListener("click", async () => {
-  const name = suFullName.value.trim();
+  const fullName = suFullName.value.trim();
   const phone = suPhone.value.trim();
   const email = emailEl.value.trim();
   const password = pwdEl.value;
 
-  if (!name || !phone) {
+  if (!fullName || !phone) {
     toast("Please provide full name and phone.", "info");
     return;
   }
@@ -94,7 +94,7 @@ signupSubmit.addEventListener("click", async () => {
   const plan = currentPlan();
 
   const { ok, status, data } = await postJson("/api/auth/signup", {
-    name, phone, email, password, plan
+    fullName, phone, email, password, plan
   });
 
   if (ok) {
@@ -110,6 +110,7 @@ signupSubmit.addEventListener("click", async () => {
     console.error("signup error", data);
   }
 });
+
 
 // ---------- sign in ----------
 signInBtn.addEventListener("click", async () => {
