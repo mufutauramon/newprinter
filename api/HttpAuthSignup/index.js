@@ -3,20 +3,16 @@ import { signJwt } from "../lib/jwt.js";
 
 export default async function (context, req) {
   try {
-    // Azure Functions v4 (Node) usually gives parsed JSON in req.body
-    // If body might be string, you could parse defensively, but not required here.
-
     const b = req.body || {};
-    const email    = String(b.email || "").trim().toLowerCase();
+    const email = String(b.email || "").trim().toLowerCase();
     const password = String(b.password || "");
-    // Accept both fullName and name (frontend mismatch safety)
-    const fullName = String(b.fullName || b.name || "").trim();
-    const phone    = String(b.phone || "").trim();
-    const plan     = String(b.plan || "").trim() || null;
+    const fullName = String(b.fullName || "").trim();
+    const phone = String(b.phone || "").trim();
+    const plan = String(b.plan || "").trim();   // NEW
 
-    // Validate
-    if (!email || !password || !fullName || !phone) {
-      return json(context, 400, { error: "fullName, phone, email and password are required" });
+    // 1) validation
+    if (!email || !password || !fullName || !phone || !plan) {
+      return json(context, 400, { error: "fullName, phone, email, password, and plan are required" });
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return json(context, 400, { error: "invalid email" });
@@ -29,13 +25,13 @@ export default async function (context, req) {
       return json(context, 400, { error: "invalid phone (use +234… or 10–15 digits)" });
     }
 
-    // Hash (placeholder — MUST match login)
+    // 2) hash
     const pwdHash = `sha1:${Buffer.from(password).toString("base64")}`;
 
-    const sql  = getSql();
+    const sql = getSql();
     const pool = await getPool();
 
-    // Unique email guard
+    // 3) unique email check
     const exists = await pool.request()
       .input("email", sql.NVarChar(256), email)
       .query("SELECT COUNT(1) AS n FROM dbo.Users WHERE email=@email");
@@ -43,32 +39,28 @@ export default async function (context, req) {
       return json(context, 409, { error: "email already exists" });
     }
 
-    // Insert
+    // 4) insert with [plan]
     const ins = await pool.request()
-  .input("email",     sql.NVarChar(256), email)
-  .input("pwd_hash",  sql.NVarChar(200), pwdHash)
-  .input("full_name", sql.NVarChar(150), fullName)
-  .input("phone",     sql.NVarChar(32),  phone)
-  .input("plan",      sql.NVarChar(50),  plan)
-  .query(`
-    INSERT INTO dbo.Users (email, pwd_hash, full_name, phone, [plan], is_operator, created_at)
-    VALUES (@email, @pwd_hash, @full_name, @phone, @plan, 0, SYSUTCDATETIME());
-    SELECT SCOPE_IDENTITY() AS id;
-  `);
+      .input("email",     sql.NVarChar(256), email)
+      .input("pwd_hash",  sql.NVarChar(200), pwdHash)
+      .input("full_name", sql.NVarChar(150), fullName)
+      .input("phone",     sql.NVarChar(32),  phone)
+      .input("plan",      sql.NVarChar(50),  plan)
+      .query(`
+        INSERT INTO dbo.Users (email, pwd_hash, full_name, phone, [plan], is_operator, created_at)
+        VALUES (@email, @pwd_hash, @full_name, @phone, @plan, 0, SYSUTCDATETIME());
+        SELECT SCOPE_IDENTITY() AS id;
+      `);
 
     const userId = ins.recordset?.[0]?.id;
 
-    // Token
+    // 5) JWT
     const token = signJwt(
       { sub: String(userId), email, fullName, phone, plan },
       { expiresInSeconds: 60 * 60 * 12 }
     );
 
-    return json(context, 200, {
-      token,
-      user: { id: userId, email, fullName, phone, plan }
-    });
-
+    return json(context, 200, { token, user: { id: userId, email, fullName, phone, plan } });
   } catch (err) {
     context.log.error("signup error", err);
     return json(context, 500, { error: err.message || String(err) });
