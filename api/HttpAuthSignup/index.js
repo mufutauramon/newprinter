@@ -51,7 +51,6 @@ export default async function (context, req) {
         VALUES (@email, @pwd_hash, @full_name, @phone, @plan, 0, SYSUTCDATETIME());
         SELECT SCOPE_IDENTITY() AS id;
       `);
-
     const userId = ins.recordset?.[0]?.id;
 
     // 5) JWT
