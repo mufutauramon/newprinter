@@ -2,8 +2,8 @@ name: Azure Static Web Apps CI/CD
 
 on:
   push:
-    branches: [ main ]        # <-- change to your default branch if not 'main'
-  workflow_dispatch:          # allows manual runs from the Actions tab
+    branches: [ main ]
+  workflow_dispatch:
 
 permissions:
   id-token: write
@@ -12,22 +12,51 @@ permissions:
 jobs:
   build_and_deploy:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
-      # Optional: build frontend if you have a package.json inside /frontend
-      - name: Build Frontend
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # -------- FRONTEND (optional build) --------
+      - name: Install frontend deps
         working-directory: frontend
         run: |
           if [ -f package.json ]; then
-            npm ci
-            npm run build || true
+            if [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ]; then
+              npm ci
+            else
+              npm install --no-audit --no-fund
+            fi
+          else
+            echo "No frontend/package.json. Skipping install."
           fi
 
-      # Install API deps (Functions)
-      - name: Setup Functions
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          if [ -f package.json ] && npm run | grep -q " build"; then
+            npm run build
+          else
+            echo "No frontend build script. Skipping."
+          fi
+
+      # -------- API (Azure Functions) --------
+      - name: Install API deps
         working-directory: api
-        run: npm ci
+        run: |
+          if [ -f package.json ]; then
+            if [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ]; then
+              npm ci --omit=dev
+            else
+              npm install --omit=dev --no-audit --no-fund
+            fi
+          else
+            echo "No api/package.json. Skipping install."
+          fi
 
       - name: Deploy to Azure Static Web Apps
         uses: Azure/static-web-apps-deploy@v1
