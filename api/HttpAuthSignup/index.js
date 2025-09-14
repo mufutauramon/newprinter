@@ -1,40 +1,71 @@
-import bcrypt from "bcryptjs";
-import { getSqlPool } from "../../lib/sql.js";
-import { sign } from "../../lib/jwt.js";
+import { getPool, getSql } from "../lib/sql.js"; // path is correct: api/HttpAuthSignup -> ../lib
 
 export default async function (context, req) {
+  context.log("signup called");
+
   try {
-    const { email, password } = req.body || {};
+    const body = req.body || {};
+    const email = (body.email || "").trim().toLowerCase();
+    const password = body.password || "";
+
     if (!email || !password) {
-      context.res = { status: 400, headers:{'Content-Type':'application/json'}, body:{ error:"email and password required" } };
-      return;
+      return json(context, 400, { error: "email and password are required" });
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return json(context, 400, { error: "invalid email" });
     }
 
-    const pool = await getSqlPool();
-    const hash = await bcrypt.hash(password, 10);
+    // NOTE: for now we store a very simple hash placeholder.
+    // Replace with bcrypt later.
+    const pwdHash = `sha1:${Buffer.from(password).toString("base64")}`;
 
-    const r = await pool.request()
-      .input("e", email)
-      .input("p", hash)
-      .query("INSERT INTO dbo.Users(email, pwd_hash) OUTPUT inserted.id VALUES(@e,@p)");
+    const sql = getSql();
+    const pool = await getPool();
+    const tx = new sql.Transaction(pool);
 
-    const id = r.recordset[0].id;
-    const token = sign({ id, email });
+    await tx.begin();
 
-    context.res = { status: 200, headers:{'Content-Type':'application/json'}, body:{ token } };
-  } catch (e) {
-    // Duplicate email? Give a friendly 409
-    if (String(e).includes("UNIQUE") || String(e).includes("duplicate")) {
-      context.res = { status: 409, headers:{'Content-Type':'application/json'}, body:{ error:"email already exists" } };
-      return;
+    // Check existence (unique index should also enforce)
+    const checkReq = new sql.Request(tx);
+    checkReq.input("email", sql.NVarChar(256), email);
+    const exists = await checkReq.query(
+      "SELECT COUNT(1) AS n FROM dbo.Users WHERE email = @email"
+    );
+    if (exists.recordset[0].n > 0) {
+      await tx.rollback();
+      return json(context, 409, { error: "email already exists" });
     }
-    context.log.error("SIGNUP ERROR:", e);
-    context.res = { status: 500, headers:{'Content-Type':'application/json'}, body:{ error: String(e) } };
+
+    // Insert user
+    const insReq = new sql.Request(tx);
+    insReq.input("email", sql.NVarChar(256), email);
+    insReq.input("pwd_hash", sql.NVarChar(200), pwdHash);
+    const ins = await insReq.query(`
+      INSERT INTO dbo.Users (email, pwd_hash, is_operator, created_at)
+      VALUES (@email, @pwd_hash, 0, SYSUTCDATETIME());
+      SELECT SCOPE_IDENTITY() AS id;
+    `);
+
+    await tx.commit();
+
+    const userId = ins.recordset?.[0]?.id;
+    return json(context, 200, { token: `TEST_${userId}` });
+  } catch (err) {
+    // Surface details so we can see what's wrong
+    context.log.error("signup error", err);
+    return json(context, 500, {
+      error: err.message,
+      code: err.code ?? null,
+      number: err.number ?? null,
+      state: err.state ?? null
+    });
   }
-  context.log.error("SIGNUP ERROR:", e);
+}
+
+function json(context, status, body) {
   context.res = {
-    status: 500,
-    headers: { "Content-Type": "application/json" },
-    body: { error: e.message || String(e) }
+    status,
+    headers: { "content-type": "application/json" },
+    body
   };
 }
