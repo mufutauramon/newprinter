@@ -1,23 +1,35 @@
 name: Azure Static Web Apps CI/CD
+
 on:
   push:
-    branches: [ main ]
-  workflow_dispatch:
+    branches: [ main ]        # <-- change to your default branch if not 'main'
+  workflow_dispatch:          # allows manual runs from the Actions tab
+
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
-  build_and_deploy_job:
+  build_and_deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Debug paths
+      # Optional: build frontend if you have a package.json inside /frontend
+      - name: Build Frontend
+        working-directory: frontend
         run: |
-          echo "== root ==" && ls -la
-          echo "== frontend ==" && ls -la frontend || true
-          echo "== api ==" && ls -la api || true
-          echo "== api subfolders ==" && find api -maxdepth 2 -type d -print
+          if [ -f package.json ]; then
+            npm ci
+            npm run build || true
+          fi
 
-      - name: Build And Deploy
+      # Install API deps (Functions)
+      - name: Setup Functions
+        working-directory: api
+        run: npm ci
+
+      - name: Deploy to Azure Static Web Apps
         uses: Azure/static-web-apps-deploy@v1
         with:
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
