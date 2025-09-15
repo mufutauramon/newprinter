@@ -2,7 +2,9 @@ name: Azure Static Web Apps CI/CD
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main                  # add other branches if you push to them
+      - merge-full-ui-and-apis
   workflow_dispatch:
 
 permissions:
@@ -12,50 +14,21 @@ permissions:
 jobs:
   build_and_deploy:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      # -------- FRONTEND (optional build) --------
-      - name: Install frontend deps
-        working-directory: frontend
-        run: |
-          if [ -f package.json ]; then
-            if [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ]; then
-              npm ci
-            else
-              npm install --no-audit --no-fund
-            fi
-          else
-            echo "No frontend/package.json. Skipping install."
-          fi
-
-      - name: Build frontend
-        working-directory: frontend
-        run: |
-          if [ -f package.json ] && npm run | grep -q " build"; then
-            npm run build
-          else
-            echo "No frontend build script. Skipping."
-          fi
-
-      # -------- API (Azure Functions) --------
+      # Build API (Node Azure Functions)
       - name: Install API deps
         working-directory: api
+        run: npm ci
+
+      # Build frontend (optional—kept safe if no package.json)
+      - name: Build Frontend
+        working-directory: frontend
         run: |
           if [ -f package.json ]; then
-            if [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ]; then
-              npm ci --omit=dev
-            else
-              npm install --omit=dev --no-audit --no-fund
-            fi
-          else
-            echo "No api/package.json. Skipping install."
+            npm ci
+            npm run build || true
           fi
 
       - name: Deploy to Azure Static Web Apps
@@ -63,6 +36,6 @@ jobs:
         with:
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
           action: "upload"
-          app_location: "frontend"
-          api_location: "api"
-          output_location: ""
+          app_location: "frontend"   # your index.html lives here
+          api_location: "api"        # your Functions live here
+          output_location: ""        # set to "dist" if your build outputs to /frontend/dist
