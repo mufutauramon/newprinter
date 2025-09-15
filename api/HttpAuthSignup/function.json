@@ -8,10 +8,7 @@
       "methods": [ "post" ],
       "route": "auth/signup"
     },
-    {
-      "type": "http",
-      "direction": "out",
-      "name": "res"
-    }
-  ]
+    { "type": "http", "direction": "out", "name": "res" }
+  ],
+  "scriptFile": "index.js"
 }
