@@ -12,12 +12,13 @@ export default async function (context, req) {
       return json(context, 400, { error: "email and password are required" });
     }
 
-    // MUST match signup hashing
+    // MUST match the hashing used in signup
     const attemptHash = `sha1:${Buffer.from(password).toString("base64")}`;
 
     const sql = getSql();
     const pool = await getPool();
 
+    // Use COALESCE so this works before/after you drop the old [plan] column
     const r = await pool.request()
       .input("email", sql.NVarChar(256), email)
       .query(`
@@ -28,9 +29,9 @@ export default async function (context, req) {
           is_operator,
           full_name,
           phone,
-          [plan] AS plan      -- <— bracket & alias
+          COALESCE(subscription_tier, [plan]) AS subscription_tier
         FROM dbo.Users
-        WHERE email=@email
+        WHERE email = @email
       `);
 
     if (!r.recordset?.length) {
@@ -50,7 +51,7 @@ export default async function (context, req) {
         is_operator: !!u.is_operator,
         fullName: u.full_name || null,
         phone: u.phone || null,
-        plan: u.plan || null,
+        plan: u.subscription_tier || null, // expose as "plan" in the token/payload
       },
       { expiresInSeconds: 60 * 60 * 12 }
     );
@@ -62,7 +63,7 @@ export default async function (context, req) {
         email: u.email,
         fullName: u.full_name,
         phone: u.phone,
-        plan: u.plan,
+        plan: u.subscription_tier, // expose as "plan" to the frontend
       },
     });
   } catch (err) {
@@ -72,5 +73,9 @@ export default async function (context, req) {
 }
 
 function json(context, status, body) {
-  context.res = { status, headers: { "content-type": "application/json" }, body };
+  context.res = {
+    status,
+    headers: { "content-type": "application/json" },
+    body,
+  };
 }
