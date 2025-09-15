@@ -5,7 +5,7 @@
       "type": "httpTrigger",
       "direction": "in",
       "name": "req",
-      "methods": [ "post", "options" ],
+      "methods": [ "post" ],
       "route": "auth/signup"
     },
     {
@@ -13,6 +13,5 @@
       "direction": "out",
       "name": "res"
     }
-  ],
-  "scriptFile": "index.js"
+  ]
 }
