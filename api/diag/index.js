@@ -1,26 +1,8 @@
-import { getPool } from "../lib/sql.js";
-
 export default async function (context, req) {
-  try {
-    const pool = await getPool();
-    const r = await pool.request().query(
-      "SELECT TOP 1 name FROM sys.tables WHERE name='Users';"
-    );
-    context.res = {
-      status: 200,
-      headers: { "content-type": "application/json" },
-      body: {
-        ok: true,
-        db: "connected",
-        hasUsersTable: !!r.recordset.length,
-        hasJwtSecret: !!process.env.JWT_SECRET
-      }
-    };
-  } catch (err) {
-    context.res = {
-      status: 500,
-      headers: { "content-type": "application/json" },
-      body: { ok: false, error: err?.message || String(err) }
-    };
-  }
+  const env = ["SQL_CONNECTION_STRING","JWT_SECRET","FUNCTIONS_NODE_VERSION"];
+  const present = Object.fromEntries(env.map(k => [k, !!process.env[k]]));
+  context.res = {
+    headers: { "content-type": "application/json" },
+    body: { status: "ok", present }
+  };
 }

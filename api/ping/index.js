@@ -1,3 +1,6 @@
 export default async function (context, req) {
-  return { status: 200, body: { ok: true, ts: new Date().toISOString() } };
+  context.res = {
+    headers: { "content-type": "application/json" },
+    body: { ok: true, when: new Date().toISOString() }
+  };
 }
