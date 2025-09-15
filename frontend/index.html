@@ -169,5 +169,112 @@
 
   <div id="toast"></div>
   <script src="script.js"></script>
+  <script>
+const $ = s => document.querySelector(s);
+
+// toast helpers (you already included similar)
+function toast(msg, type='success') {
+  const wrap = document.getElementById('toast');
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.textContent = msg;
+  wrap.appendChild(el);
+  setTimeout(() => el.remove(), 3500);
+}
+
+async function postJson(url, body) {
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(body)
+  });
+  let data = null;
+  try { data = await r.json(); } catch { data = null; }
+  return { ok: r.ok, status: r.status, data };
+}
+
+function selectedPlan() {
+  const p = document.querySelector('input[name="plan"]:checked');
+  return p ? p.value : 'Basic';
+}
+
+// --- Sign up flow: opens dialog to collect fullName & phone, then POSTs with email/password/plan
+$('#signUpBtn').addEventListener('click', async () => {
+  const dlg = $('#signupDlg');
+  dlg.showModal();
+
+  const submit = $('#signupSubmit');
+  const handler = async (e) => {
+    e.preventDefault();
+    const fullName = $('#su_fullName').value.trim();
+    const phone    = $('#su_phone').value.trim();
+    const email    = $('#email').value.trim().toLowerCase();
+    const password = $('#password').value;
+    const plan     = selectedPlan();
+
+    if (!email || !password || !fullName || !phone) {
+      toast('Please fill full name, phone, email, and password', 'error');
+      return;
+    }
+
+    const { ok, status, data } = await postJson('/api/auth/signup', {
+      fullName, phone, email, password, plan
+    });
+
+    if (ok) {
+      localStorage.setItem('rp_token', data.token || '');
+      toast('Signup successful', 'success');
+      dlg.close();
+      // update UI
+      $('#authStatus').textContent = email;
+      $('#signOutBtn').classList.remove('hidden');
+      $('#dash').classList.remove('hidden');
+    } else if (status === 409) {
+      toast('Email already exists', 'error');
+    } else if (status === 400) {
+      toast(data?.error || 'Invalid signup data', 'error');
+    } else {
+      toast('Signup failed (' + status + ')', 'error');
+      console.error(data);
+    }
+  };
+
+  submit.addEventListener('click', handler, { once: true });
+});
+
+// --- Sign in (email/password)
+$('#signInBtn').addEventListener('click', async () => {
+  const email    = $('#email').value.trim().toLowerCase();
+  const password = $('#password').value;
+
+  if (!email || !password) {
+    toast('Enter email and password', 'error');
+    return;
+  }
+
+  const { ok, status, data } = await postJson('/api/auth/login', { email, password });
+  if (ok) {
+    localStorage.setItem('rp_token', data.token || '');
+    toast('Signed in', 'success');
+    $('#authStatus').textContent = email;
+    $('#signOutBtn').classList.remove('hidden');
+    $('#dash').classList.remove('hidden');
+  } else if (status === 401) {
+    toast('Invalid email or password', 'error');
+  } else {
+    toast('Login failed (' + status + ')', 'error');
+    console.error(data);
+  }
+});
+
+// optional sign out
+$('#signOutBtn').addEventListener('click', () => {
+  localStorage.removeItem('rp_token');
+  $('#authStatus').textContent = 'Not signed in';
+  $('#signOutBtn').classList.add('hidden');
+  $('#dash').classList.add('hidden');
+});
+</script>
+
 </body>
 </html>
