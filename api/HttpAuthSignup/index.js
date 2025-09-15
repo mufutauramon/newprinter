@@ -41,16 +41,17 @@ export default async function (context, req) {
 
     // 4) insert with [plan]
     const ins = await pool.request()
-      .input("email",     sql.NVarChar(256), email)
-      .input("pwd_hash",  sql.NVarChar(200), pwdHash)
-      .input("full_name", sql.NVarChar(150), fullName)
-      .input("phone",     sql.NVarChar(32),  phone)
-      .input("plan",      sql.NVarChar(50),  plan)
-      .query(`
-        INSERT INTO dbo.Users (email, pwd_hash, full_name, phone, [plan], is_operator, created_at)
-        VALUES (@email, @pwd_hash, @full_name, @phone, @plan, 0, SYSUTCDATETIME());
-        SELECT SCOPE_IDENTITY() AS id;
-      `);
+  .input("email", sql.NVarChar(256), email)
+  .input("pwd_hash", sql.NVarChar(200), pwdHash)
+  .input("full_name", sql.NVarChar(150), fullName)
+  .input("phone", sql.NVarChar(32), phone)
+  .input("plan", sql.NVarChar(50), b.plan || "Basic")  // default if none
+  .query(`
+    INSERT INTO dbo.Users (email, pwd_hash, full_name, phone, [plan], is_operator, created_at)
+    VALUES (@email, @pwd_hash, @full_name, @phone, @plan, 0, SYSUTCDATETIME());
+    SELECT SCOPE_IDENTITY() AS id;
+  `);
+
     const userId = ins.recordset?.[0]?.id;
 
     // 5) JWT
