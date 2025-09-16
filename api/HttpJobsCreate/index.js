@@ -5,11 +5,14 @@ export default async function (context, req) {
   try {
     const user = getUser(req);
 
-    // Validate user id is numeric (or we’ll get a SQL bind error)
+    // validate numeric user id early
     const rawUid = user.sub ?? user.id;
     const uid = parseInt(rawUid, 10);
     if (!Number.isInteger(uid)) {
-      return json(context, 400, { error: "invalid_user_id", detail: `Expected numeric user id, got: ${String(rawUid)}` });
+      return json(context, 400, {
+        error: "invalid_user_id",
+        detail: `Expected numeric user id, got: ${String(rawUid)}`
+      });
     }
 
     const { fileName, blobUrl, pages, color, duplex } = req.body || {};
@@ -22,17 +25,26 @@ export default async function (context, req) {
     const pool = await getPool();
     const sql = getSql();
 
-    // Get latest active subscription
-    const s = await pool.request()
-      .input("uid", sql.Int, uid)
-      .query(`
-        SELECT TOP 1 id, pages_remaining
-        FROM Subscriptions
-        WHERE user_id=@uid AND active=1
-        ORDER BY start_at DESC
-      `);
+    // 1) read latest active subscription (diagnostic-friendly)
+    let sub;
+    try {
+      const s = await pool.request()
+        .input("uid", sql.Int, uid)
+        .query(`
+          SELECT TOP 1 id, pages_remaining
+          FROM Subscriptions
+          WHERE user_id=@uid AND active=1
+          ORDER BY start_at DESC
+        `);
+      sub = s.recordset[0];
+    } catch (e) {
+      // invalid object name 'Subscriptions' etc.
+      return json(context, 500, {
+        error: "sql_subscriptions_query_failed",
+        detail: e?.originalError?.info?.message || e?.message || String(e)
+      });
+    }
 
-    const sub = s.recordset[0];
     if (!sub) return json(context, 400, { error: "no_active_subscription" });
 
     const tx = new sql.Transaction(pool);
@@ -50,8 +62,8 @@ export default async function (context, req) {
       }
 
       const pickup = Math.floor(100000 + Math.random() * 900000).toString();
-      const isColor  = String(color  || "").toLowerCase() === "color" || String(color  || "").toLowerCase() === "colour";
-      const isDuplex = String(duplex || "").toLowerCase() === "yes"   || duplex === true;
+      const isColor  = String(color  || "").toLowerCase().includes("color");
+      const isDuplex = String(duplex || "").toLowerCase() === "yes" || duplex === true;
 
       const ins = await rq
         .input("uid", sql.Int, uid)
@@ -74,7 +86,10 @@ export default async function (context, req) {
     } catch (e) {
       await tx.rollback();
       context.log.error("job create failed", e);
-      return json(context, 500, { error: "job_create_failed", detail: e?.originalError?.info?.message || e?.message || String(e) });
+      return json(context, 500, {
+        error: "job_create_failed",
+        detail: e?.originalError?.info?.message || e?.message || String(e)
+      });
     }
   } catch (e) {
     const status = e.status || 500;
