@@ -7,10 +7,11 @@ export function signJwt(payload, { expiresInSeconds = 60 * 60 * 12 } = {}) {
 }
 
 // Extract and verify user from Authorization: Bearer <token>
+
 export function getUser(req) {
   const hdr = req.headers?.authorization || req.headers?.Authorization || "";
   const m = /^Bearer\s+(.+)$/i.exec(hdr);
-  if (!m) throw new Error("missing_bearer");
+  if (!m) { const err = new Error("missing_bearer"); err.status = 401; throw err; }
   try {
     return jwt.verify(m[1], SECRET);
   } catch (e) {

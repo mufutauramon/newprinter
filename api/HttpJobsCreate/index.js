@@ -5,7 +5,7 @@ export default async function (context, req) {
   try {
     const user = getUser(req);
 
-    // --- Validate numeric user id early
+    // Validate user id is numeric (or we’ll get a SQL bind error)
     const rawUid = user.sub ?? user.id;
     const uid = parseInt(rawUid, 10);
     if (!Number.isInteger(uid)) {
@@ -22,7 +22,7 @@ export default async function (context, req) {
     const pool = await getPool();
     const sql = getSql();
 
-    // Latest active subscription
+    // Get latest active subscription
     const s = await pool.request()
       .input("uid", sql.Int, uid)
       .query(`
@@ -50,18 +50,17 @@ export default async function (context, req) {
       }
 
       const pickup = Math.floor(100000 + Math.random() * 900000).toString();
-      const isColor = String(color || "").toLowerCase() === "color" || String(color || "").toLowerCase() === "colour";
-      const isDuplex = String(duplex || "").toLowerCase() === "yes" || duplex === true;
+      const isColor  = String(color  || "").toLowerCase() === "color" || String(color  || "").toLowerCase() === "colour";
+      const isDuplex = String(duplex || "").toLowerCase() === "yes"   || duplex === true;
 
-      // Return the inserted row
       const ins = await rq
         .input("uid", sql.Int, uid)
-        .input("fn", sql.NVarChar(260), fileName)
+        .input("fn",  sql.NVarChar(260),  fileName)
         .input("url", sql.NVarChar(2048), blobUrl)
-        .input("pg", sql.Int, pg)
-        .input("clr", sql.Bit, isColor ? 1 : 0)
-        .input("dx", sql.Bit, isDuplex ? 1 : 0)
-        .input("pc", sql.VarChar(12), pickup)
+        .input("pg",  sql.Int,            pg)
+        .input("clr", sql.Bit,            isColor ? 1 : 0)
+        .input("dx",  sql.Bit,            isDuplex ? 1 : 0)
+        .input("pc",  sql.VarChar(12),    pickup)
         .query(`
           INSERT INTO Jobs (user_id, file_name, storage_url, pages, color, duplex, pickup_code, status, created_at)
           OUTPUT inserted.id, inserted.user_id, inserted.file_name, inserted.storage_url,
@@ -75,7 +74,6 @@ export default async function (context, req) {
     } catch (e) {
       await tx.rollback();
       context.log.error("job create failed", e);
-      // Surface the real SQL error in 'detail'
       return json(context, 500, { error: "job_create_failed", detail: e?.originalError?.info?.message || e?.message || String(e) });
     }
   } catch (e) {
