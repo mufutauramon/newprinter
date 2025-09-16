@@ -5,7 +5,7 @@ export default async function (context, req) {
   try {
     const user = getUser(req);
 
-    // --- NEW: validate user id is numeric
+    // --- Validate numeric user id early
     const rawUid = user.sub ?? user.id;
     const uid = parseInt(rawUid, 10);
     if (!Number.isInteger(uid)) {
@@ -22,7 +22,7 @@ export default async function (context, req) {
     const pool = await getPool();
     const sql = getSql();
 
-    // Get latest active subscription
+    // Latest active subscription
     const s = await pool.request()
       .input("uid", sql.Int, uid)
       .query(`
@@ -50,18 +50,17 @@ export default async function (context, req) {
       }
 
       const pickup = Math.floor(100000 + Math.random() * 900000).toString();
-      const isColor =
-        String(color || "").toLowerCase() === "color" ||
-        String(color || "").toLowerCase() === "colour";
+      const isColor = String(color || "").toLowerCase() === "color" || String(color || "").toLowerCase() === "colour";
+      const isDuplex = String(duplex || "").toLowerCase() === "yes" || duplex === true;
 
-      // --- CHANGE: OUTPUT the inserted row so frontend can prepend it
+      // Return the inserted row
       const ins = await rq
         .input("uid", sql.Int, uid)
         .input("fn", sql.NVarChar(260), fileName)
         .input("url", sql.NVarChar(2048), blobUrl)
         .input("pg", sql.Int, pg)
         .input("clr", sql.Bit, isColor ? 1 : 0)
-        .input("dx", sql.Bit, String(duplex || "").toLowerCase() === "yes" ? 1 : 0)
+        .input("dx", sql.Bit, isDuplex ? 1 : 0)
         .input("pc", sql.VarChar(12), pickup)
         .query(`
           INSERT INTO Jobs (user_id, file_name, storage_url, pages, color, duplex, pickup_code, status, created_at)
@@ -75,8 +74,8 @@ export default async function (context, req) {
       return json(context, 200, ins.recordset[0]);
     } catch (e) {
       await tx.rollback();
-      // --- TEMP: surface SQL error during debugging
       context.log.error("job create failed", e);
+      // Surface the real SQL error in 'detail'
       return json(context, 500, { error: "job_create_failed", detail: e?.originalError?.info?.message || e?.message || String(e) });
     }
   } catch (e) {
