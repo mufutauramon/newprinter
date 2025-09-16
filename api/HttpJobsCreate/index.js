@@ -1,54 +1,74 @@
-// api/HttpJobsCreate/index.js
 import { getPool, getSql } from "../../lib/sql.js";
 import { getUser } from "../../lib/jwt.js";
 
+function json(ctx, status, body) {
+  ctx.res = { status, headers: { "content-type": "application/json" }, body };
+}
+
 export default async function (context, req) {
   try {
-    // 0) Identify caller early
-    const user = getUser(req); // throws 401 -> caught below
-    const uid = Number(user.sub || user.id);
+    context.log("HttpJobsCreate invoked");
 
-    // 1) DEBUG SHORT-CIRCUIT: if client sends { debug: true } just echo
+    // ---------- DEBUG ECHO ----------
     if (req.body && req.body.debug) {
+      context.log("Debug mode echoing body");
       return json(context, 200, {
         ok: true,
-        debug: "echo",
-        user: { sub: user.sub, id: user.id, email: user.email },
-        body: req.body,
+        route: "jobs",
+        method: "POST",
+        echo: req.body
       });
     }
 
-    // 2) Validate inputs
+    // ---------- AUTH ----------
+    let user;
+    try {
+      user = getUser(req); // throws if missing/invalid
+    } catch (e) {
+      context.log.warn("Auth error:", e.message);
+      return json(context, e.status || 401, { error: e.message || "unauthorized" });
+    }
+    const userId = Number(user.sub || user.id);
+    if (!userId) return json(context, 401, { error: "invalid_user" });
+
+    // ---------- INPUT ----------
     const { fileName, blobUrl, pages, color, duplex } = req.body || {};
-    if (!fileName || !blobUrl || !pages) {
+    if (!fileName || !blobUrl || pages == null) {
       return json(context, 400, { error: "fileName, blobUrl and pages are required" });
     }
 
-    const pg = parseInt(pages, 10) || 0;
-    if (pg <= 0) return json(context, 400, { error: "pages must be > 0" });
+    const pg = parseInt(pages, 10);
+    if (!Number.isFinite(pg) || pg <= 0) {
+      return json(context, 400, { error: "pages must be a positive integer" });
+    }
 
-    // 3) DB work (with its own try/catch to surface real errors)
     const pool = await getPool();
     const sql = getSql();
 
-    // latest active subscription
-    const s = await pool.request()
-      .input("uid", sql.Int, uid)
-      .query(`
-        SELECT TOP 1 id, pages_remaining
-        FROM Subscriptions
-        WHERE user_id=@uid AND active=1
-        ORDER BY start_at DESC
-      `);
-
-    const sub = s.recordset[0];
-    if (!sub) return json(context, 400, { error: "no active subscription" });
-
-    // transaction
-    const tx = new sql.Transaction(pool);
-    await tx.begin();
-
+    // ---------- ACTIVE SUB ----------
+    let sub;
     try {
+      const s = await pool.request()
+        .input("uid", sql.Int, userId)
+        .query(`
+          SELECT TOP 1 id, pages_remaining
+          FROM dbo.Subscriptions
+          WHERE user_id=@uid AND active=1
+          ORDER BY start_at DESC
+        `);
+      sub = s.recordset[0];
+    } catch (e) {
+      context.log.error("SQL select subscription failed:", e);
+      return json(context, 500, { error: "select_subscription_failed" });
+    }
+
+    if (!sub) return json(context, 400, { error: "no_active_subscription" });
+
+    // ---------- TRANSACTION ----------
+    const tx = new sql.Transaction(pool);
+    try {
+      await tx.begin();
+
       const rq = new sql.Request(tx);
 
       const toDeduct = Math.min((sub.pages_remaining | 0), pg);
@@ -56,66 +76,45 @@ export default async function (context, req) {
         await rq
           .input("sid", sql.Int, sub.id)
           .input("d", sql.Int, toDeduct)
-          .query("UPDATE Subscriptions SET pages_remaining = pages_remaining - @d WHERE id=@sid");
+          .query(`
+            UPDATE dbo.Subscriptions
+            SET pages_remaining = pages_remaining - @d
+            WHERE id=@sid
+          `);
       }
 
       const pickup = Math.floor(100000 + Math.random() * 900000).toString();
 
-      await rq
-        .input("uid", sql.Int, uid)
+      // Insert and return the created row
+      const ins = await rq
+        .input("uid", sql.Int, userId)
         .input("fn", sql.NVarChar(260), fileName)
         .input("url", sql.NVarChar(2048), blobUrl)
         .input("pg", sql.Int, pg)
-        .input("clr", sql.Bit, (color === "color") ? 1 : 0)
-        .input("dx", sql.Bit, duplex ? 1 : 0)
+        .input("clr", sql.Bit, String(color).toLowerCase() === "color")
+        .input("dx", sql.Bit, !!duplex && String(duplex).toLowerCase() !== "no")
         .input("pc", sql.VarChar(12), pickup)
         .query(`
-          INSERT INTO Jobs (user_id, file_name, storage_url, pages, color, duplex, pickup_code, status, created_at)
+          INSERT INTO dbo.Jobs
+            (user_id, file_name, storage_url, pages, color, duplex, pickup_code, status, created_at)
+          OUTPUT INSERTED.id, INSERTED.file_name, INSERTED.storage_url, INSERTED.pages,
+                 INSERTED.color, INSERTED.duplex, INSERTED.status, INSERTED.pickup_code, INSERTED.created_at
           VALUES (@uid, @fn, @url, @pg, @clr, @dx, @pc, 'Queued', SYSUTCDATETIME());
         `);
 
       await tx.commit();
 
-      // return the minimal info the UI can use
-      return json(context, 200, {
-        status: "Queued",
-        pickup_code: pickup,
-        // optional: echo back fields so UI can immediately add a row
-        file_name: fileName,
-        storage_url: blobUrl,
-        pages: pg,
-        color: color === "color",
-        duplex: !!duplex,
-        created_at: new Date().toISOString(),
-      });
-    } catch (dbErr) {
-      await tx.rollback();
-      context.log.error("job create failed", dbErr);
-      // Surface full error so we can see it in the browser Response
-      return json(context, 500, { error: "job_create_failed", detail: safeErr(dbErr) });
+      // return the created job (first row from OUTPUT)
+      const job = ins.recordset?.[0] ?? { status: "Queued", pickup_code: pickup };
+      return json(context, 200, job);
+    } catch (e) {
+      try { await tx.rollback(); } catch {}
+      context.log.error("job create failed:", e?.message || e);
+      return json(context, 500, { error: "job_create_failed", detail: String(e.message || e) });
     }
   } catch (e) {
-    // Catches auth errors, validation throws, unexpected throws
-    context.log.error("HttpJobsCreate top-level error", e);
-    return json(context, e.status || 500, { error: String(e.message || e), detail: safeErr(e) });
+    context.log.error("top-level HttpJobsCreate error:", e);
+    const status = e.status || 500;
+    return json(context, status, { error: String(e.message || e) });
   }
-}
-
-function json(ctx, status, body) {
-  // Force JSON text always, even on errors
-  ctx.res = {
-    status,
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body, null, 2),
-  };
-}
-
-function safeErr(e) {
-  return {
-    message: e?.message,
-    code: e?.code,
-    number: e?.number,
-    name: e?.name,
-    stack: (e?.stack || "").split("\n").slice(0, 3),
-  };
 }
