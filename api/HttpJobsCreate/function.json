@@ -5,7 +5,7 @@
       "type": "httpTrigger",
       "direction": "in",
       "name": "req",
-      "methods": ["get", "post"],   // <— add GET for this test
+      "methods": ["get", "post"],   
       "route": "jobs"
     },
     {
