@@ -4,20 +4,21 @@ import { getUser } from "../../lib/jwt.js";
 export default async function (context, req) {
   try {
     // ---------- Auth ----------
-    const u = getUser(req);                    // throws on bad/missing token
-    const uid = parseInt(u?.sub ?? u?.id, 10); // your tokens use sub as user id
+    const u = getUser(req); // throws on invalid token
+    const uid = parseInt(u?.sub ?? u?.id, 10);
     if (!Number.isInteger(uid)) {
       return json(context, 401, { error: "invalid_user", detail: `uid=${String(u?.sub ?? u?.id)}` });
     }
 
-    // ---------- Validate body ----------
+    // ---------- Body ----------
     const { fileName, blobUrl, pages, color, duplex } = req.body || {};
-    if (!fileName || !blobUrl || !pages)
+    if (!fileName || !blobUrl || !pages) {
       return json(context, 400, { error: "bad_request", detail: "fileName, blobUrl, pages required" });
-
+    }
     const pg = parseInt(pages, 10);
-    if (!Number.isInteger(pg) || pg <= 0)
+    if (!Number.isInteger(pg) || pg <= 0) {
       return json(context, 400, { error: "bad_request", detail: "pages must be a positive integer" });
+    }
 
     const isColor  = String(color  || "").toLowerCase().includes("color");
     const isDuplex = /^(yes|true|1)$/i.test(String(duplex || "yes"));
@@ -26,7 +27,7 @@ export default async function (context, req) {
     const pool = await getPool();
     const sql  = getSql();
 
-    // get latest active subscription
+    // Latest active subscription
     const subQ = await pool.request()
       .input("uid", sql.Int, uid)
       .query(`
@@ -39,14 +40,12 @@ export default async function (context, req) {
     const sub = subQ.recordset[0];
     if (!sub) return json(context, 400, { error: "no_active_subscription" });
 
-    // ---------- Tx: deduct + insert ----------
     const tx = new sql.Transaction(pool);
     await tx.begin();
 
     try {
       const rq = new sql.Request(tx);
 
-      // Deduct up to pg pages (never below zero)
       const toDeduct = Math.min((sub.pages_remaining | 0), pg);
       if (toDeduct > 0) {
         await rq
@@ -77,19 +76,38 @@ export default async function (context, req) {
         `);
 
       await tx.commit();
-      return json(context, 200, ins.recordset[0]); // send the row back to the frontend
+      return json(context, 200, ins.recordset[0]);
     } catch (e) {
       await tx.rollback();
       context.log.error("job_create_failed", e);
-      return json(context, 500, { error: "job_create_failed", detail: e?.message || String(e) });
+      return json(context, 500, {
+        error: "job_create_failed",
+        detail: errInfo(e)
+      });
     }
   } catch (e) {
     const status = e.status || 500;
     context.log.error("jobs_create_outer_error", e);
-    return json(context, status, { error: e?.message || String(e) });
+    return json(context, status, { error: "outer_error", detail: errInfo(e) });
   }
 }
 
 function json(ctx, status, body) {
   ctx.res = { status, headers: { "content-type": "application/json" }, body };
+}
+
+// pull as much detail as possible from mssql errors
+function errInfo(e) {
+  return {
+    message: e?.message || String(e),
+    code: e?.code,
+    number: e?.number,
+    state: e?.state,
+    class: e?.class,
+    lineNumber: e?.lineNumber,
+    serverName: e?.serverName,
+    procName: e?.procName,
+    originalInfo: e?.originalError?.info,
+    stackTop: (e?.stack || "").split("\n").slice(0, 3).join("\n")
+  };
 }
