@@ -181,33 +181,33 @@ signOutBtn.addEventListener("click", () => {
 });
 
 // ---------- (optional) quota + jobs loaders you can wire later ----------
-// async function refreshQuota() {
-//   const res = await getJson("/api/me/quota", { auth: true });
-//   if (!res.ok) return;
-//   const { plan, remaining, total } = res.data;
-//   planNameEl.textContent = plan || "—";
-//   remainingEl.textContent = String(remaining ?? 0);
-//   const pct = total ? Math.max(0, Math.min(100, Math.round((remaining / total) * 100))) : 0;
-//   quotaFill.style.width = pct + "%";
-// }
+async function refreshQuota() {
+  const res = await getJson("/api/me/quota", { auth: true });
+  if (!res.ok) return;
+  const { plan, remaining, total } = res.data;
+  planNameEl.textContent = plan || "—";
+  remainingEl.textContent = String(remaining ?? 0);
+  const pct = total ? Math.max(0, Math.min(100, Math.round((remaining / total) * 100))) : 0;
+  quotaFill.style.width = pct + "%";
+}
 
-// async function refreshJobs() {
-//   const res = await getJson("/api/jobs", { auth: true });
-//   if (!res.ok) return;
-//   jobsTable.innerHTML = "";
-//   for (const j of res.data) {
-//     const tr = document.createElement("tr");
-//     tr.innerHTML = `
-//       <td>${new Date(j.created_at).toLocaleString()}</td>
-//       <td>${j.file_name}</td>
-//       <td>${j.pages}</td>
-//       <td>${j.color ? "Color" : "B/W"} • ${j.duplex ? "Duplex" : "Simplex"}</td>
-//       <td>${j.status}</td>
-//       <td>${j.pickup_code || ""}</td>
-//     `;
-//     jobsTable.appendChild(tr);
-//   }
-// }
+async function refreshJobs() {
+  const res = await getJson("/api/jobs", { auth: true });
+  if (!res.ok) return;
+  jobsTable.innerHTML = "";
+  for (const j of res.data) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${new Date(j.created_at).toLocaleString()}</td>
+      <td>${j.file_name}</td>
+      <td>${j.pages}</td>
+      <td>${j.color ? "Color" : "B/W"} • ${j.duplex ? "Duplex" : "Simplex"}</td>
+      <td>${j.status}</td>
+      <td>${j.pickup_code || ""}</td>
+    `;
+    jobsTable.appendChild(tr);
+  }
+}
 
 // ---------- boot ----------
 (function init() {
