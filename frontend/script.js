@@ -84,7 +84,7 @@ const quotaFill  = $("#quotaFill");
 const jobsTable  = $("#jobsTable tbody");
 
 // ---------- upload elements (NEW) ----------
-const fileEl   = $("#file");
+const fileEl   = $("#fileInput"); // <-- updated to match your HTML
 const pagesEl  = $("#pages");
 const colorEl  = $("#color");
 const duplexEl = $("#duplex");
