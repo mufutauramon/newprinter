@@ -43,8 +43,12 @@ export default async function (context, req) {
 
     return json(context, 200, ins.recordset[0]);
   } catch (e) {
-    context.log.error("jobs minimal insert failed", e);
-    return json(context, 500, { error: "jobs_insert_failed", detail: e?.originalError?.info?.message || e?.message || String(e) });
+  await tx.rollback();
+  context.log.error("job create failed", e);
+  return json(context, 500, {
+    error: "job_create_failed",
+    detail: e?.originalError?.info?.message || e?.message || String(e)
+  });
   }
 }
 
