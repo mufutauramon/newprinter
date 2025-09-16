@@ -1,28 +1,95 @@
-import jwt from "jsonwebtoken";
+import { getPool, getSql } from "../../lib/sql.js";
+import { getUser } from "../../lib/jwt.js";
 
 export default async function (context, req) {
   try {
-    const auth = req.headers["authorization"] || "";
-    if (!auth.startsWith("Bearer ")) {
-      context.res = { status: 401, body: { error: "Missing token" } };
-      return;
+    // ---------- Auth ----------
+    const u = getUser(req);                    // throws on bad/missing token
+    const uid = parseInt(u?.sub ?? u?.id, 10); // your tokens use sub as user id
+    if (!Number.isInteger(uid)) {
+      return json(context, 401, { error: "invalid_user", detail: `uid=${String(u?.sub ?? u?.id)}` });
     }
 
-    const token = auth.slice(7);
-    const payload = jwt.decode(token); // just decode, no verify yet
+    // ---------- Validate body ----------
+    const { fileName, blobUrl, pages, color, duplex } = req.body || {};
+    if (!fileName || !blobUrl || !pages)
+      return json(context, 400, { error: "bad_request", detail: "fileName, blobUrl, pages required" });
 
-    context.res = {
-      status: 200,
-      headers: { "content-type": "application/json" },
-      body: {
-        ok: true,
-        route: "jobs",
-        method: req.method,
-        tokenPayload: payload
+    const pg = parseInt(pages, 10);
+    if (!Number.isInteger(pg) || pg <= 0)
+      return json(context, 400, { error: "bad_request", detail: "pages must be a positive integer" });
+
+    const isColor  = String(color  || "").toLowerCase().includes("color");
+    const isDuplex = /^(yes|true|1)$/i.test(String(duplex || "yes"));
+
+    // ---------- DB ----------
+    const pool = await getPool();
+    const sql  = getSql();
+
+    // get latest active subscription
+    const subQ = await pool.request()
+      .input("uid", sql.Int, uid)
+      .query(`
+        SELECT TOP 1 id, user_id, pages_remaining, active, start_at
+        FROM dbo.Subscriptions
+        WHERE user_id=@uid AND active=1
+        ORDER BY start_at DESC
+      `);
+
+    const sub = subQ.recordset[0];
+    if (!sub) return json(context, 400, { error: "no_active_subscription" });
+
+    // ---------- Tx: deduct + insert ----------
+    const tx = new sql.Transaction(pool);
+    await tx.begin();
+
+    try {
+      const rq = new sql.Request(tx);
+
+      // Deduct up to pg pages (never below zero)
+      const toDeduct = Math.min((sub.pages_remaining | 0), pg);
+      if (toDeduct > 0) {
+        await rq
+          .input("sid", sql.Int, sub.id)
+          .input("d",   sql.Int, toDeduct)
+          .query(`UPDATE dbo.Subscriptions SET pages_remaining = pages_remaining - @d WHERE id=@sid`);
       }
-    };
-  } catch (err) {
-    context.log("Auth check failed:", err);
-    context.res = { status: 500, body: { error: "Auth step failed" } };
+
+      const pickup = Math.floor(100000 + Math.random() * 900000).toString();
+
+      const ins = await rq
+        .input("uid", sql.Int, uid)
+        .input("fn",  sql.NVarChar(260),  fileName)
+        .input("url", sql.NVarChar(2048), blobUrl)
+        .input("pg",  sql.Int,            pg)
+        .input("clr", sql.Bit,            isColor ? 1 : 0)
+        .input("dx",  sql.Bit,            isDuplex ? 1 : 0)
+        .input("pc",  sql.VarChar(12),    pickup)
+        .query(`
+          INSERT INTO dbo.Jobs
+            (user_id, file_name, storage_url, pages, color, duplex, pickup_code, status, created_at)
+          OUTPUT
+            inserted.id, inserted.user_id, inserted.file_name, inserted.storage_url,
+            inserted.pages, inserted.color, inserted.duplex, inserted.status,
+            inserted.pickup_code, inserted.created_at
+          VALUES
+            (@uid, @fn, @url, @pg, @clr, @dx, @pc, 'Queued', SYSUTCDATETIME());
+        `);
+
+      await tx.commit();
+      return json(context, 200, ins.recordset[0]); // send the row back to the frontend
+    } catch (e) {
+      await tx.rollback();
+      context.log.error("job_create_failed", e);
+      return json(context, 500, { error: "job_create_failed", detail: e?.message || String(e) });
+    }
+  } catch (e) {
+    const status = e.status || 500;
+    context.log.error("jobs_create_outer_error", e);
+    return json(context, status, { error: e?.message || String(e) });
   }
+}
+
+function json(ctx, status, body) {
+  ctx.res = { status, headers: { "content-type": "application/json" }, body };
 }
