@@ -225,13 +225,17 @@ async function refreshJobs() {
 const BLOB_SAS_URL = "/api/blob/sas"; // your new SAS function route
 
 async function requestSas(file) {
-  // asks backend for a single-blob SAS upload URL
-  const res = await postJson(BLOB_SAS_URL, {
+  const res = await postJson("/api/blob/sas", {
     fileName: file.name,
     contentType: file.type || "application/octet-stream"
   }, { auth: true });
 
-  if (!res.ok) throw new Error(`SAS request failed (${res.status})`);
+  if (!res.ok) {
+    console.error("[SAS] failed", res.status, res.data);
+    // show any backend error if present
+    const msg = res?.data?.error || res?.data?.raw || `HTTP ${res.status}`;
+    throw new Error(`SAS request failed: ${msg}`);
+  }
   return res.data; // { uploadUrl, blobUrl, blobName }
 }
 
