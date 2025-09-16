@@ -1,28 +1,17 @@
-import { getSqlPool } from '../../lib/sql.js';
-import { getUser } from '../../lib/jwt.js';
-
-export default async function (context, req) {
-  try {
-    const user = getUser(req);
-    const { planName } = req.body || {};
-    const pool = await getSqlPool();
-    const p = await pool.request().input('n', planName)
-      .query("SELECT TOP 1 id, quota_pages FROM Plans WHERE name=@n");
-    if (!p.recordset.length) return { status: 400, body: { error: 'plan not found' } };
-
-    const plan = p.recordset[0];
-    const t = new (pool.constructor).Transaction(pool);
-    await t.begin();
-    try {
-      const rq = new (pool.constructor).Request(t);
-      await rq.input('uid', user.id)
-        .query("UPDATE Subscriptions SET active=0, end_at=SYSUTCDATETIME() WHERE user_id=@uid AND active=1");
-      await rq.input('uid', user.id).input('pid', plan.id).input('q', plan.quota_pages)
-        .query("INSERT INTO Subscriptions(user_id, plan_id, pages_remaining) VALUES(@uid,@pid,@q)");
-      await t.commit();
-    } catch (e) { await t.rollback(); throw e; }
-    return { status: 200, body: { plan: planName, quota: plan.quota_pages } };
-  } catch (e) {
-    const code = e.status || 500; return { status: code, body: { error: 'subscribe failed' } };
-  }
-}
+// TEMP DIAGNOSTIC VERSION (skip subscription deduction)
+const ins = await pool.request()
+  .input("uid", sql.Int, uid)
+  .input("fn",  sql.NVarChar(260),  fileName)
+  .input("url", sql.NVarChar(2048), blobUrl)
+  .input("pg",  sql.Int,            pg)
+  .input("clr", sql.Bit,            String(color||"").toLowerCase().includes("color") ? 1 : 0)
+  .input("dx",  sql.Bit,            String(duplex||"").toLowerCase() === "yes" ? 1 : 0)
+  .input("pc",  sql.VarChar(12),    Math.floor(100000 + Math.random() * 900000).toString())
+  .query(`
+    INSERT INTO Jobs (user_id, file_name, storage_url, pages, color, duplex, pickup_code, status, created_at)
+    OUTPUT inserted.id, inserted.user_id, inserted.file_name, inserted.storage_url,
+           inserted.pages, inserted.color, inserted.duplex, inserted.status,
+           inserted.pickup_code, inserted.created_at
+    VALUES (@uid, @fn, @url, @pg, @clr, @dx, @pc, 'Queued', SYSUTCDATETIME());
+  `);
+return json(context, 200, ins.recordset[0]);
