@@ -1,114 +1,109 @@
 // api/HttpJobsCreate/index.js
-// Node v18, Azure Functions v4, package.json has "type":"module"
+import { getUser } from "../../lib/jwt.js"; // <-- your path
+// If you’ll add SQL later, you can import here:
+// import { getPool, getSql } from "../../lib/sql.js";
 
-function safeReply(context, status, stage, bodyObj = {}) {
+function safeReply(context, status, stage, body) {
   context.res = {
     status,
     headers: { "x-rpn-stage": stage, "content-type": "application/json" },
-    body: JSON.stringify(bodyObj),
+    body: JSON.stringify(body ?? {}),
   };
 }
 
-/** Normalize inputs coming from the front-end */
-function coerceIncoming(body = {}) {
-  const fileName  = (body.fileName || body.filename || "").toString();
-  const blobUrl   = (body.blobUrl  || body.storage_url || "").toString();
-  const pagesNum  = parseInt(body.pages, 10);
-  const pages     = Number.isFinite(pagesNum) && pagesNum > 0 ? pagesNum : 1;
-
-  // "color" can be "color", "bw", true/false, etc.
-  const colorStr  = (body.color || "").toString().toLowerCase();
-  const color     = colorStr.includes("color") || colorStr === "1" || colorStr === "true";
-
-  // "duplex" usually "Yes"/"No"
-  const duplexStr = (body.duplex || "").toString().toLowerCase();
-  const duplex    = duplexStr.startsWith("y") || duplexStr === "1" || duplexStr === "true";
-
-  return { fileName, blobUrl, pages, color, duplex };
-}
-
 export default async function (context, req) {
-  // ---------- Echo path (no auth header) ----------
-  const authHeader = req.headers?.authorization || req.headers?.Authorization;
-  if (!authHeader) {
-    // Leave the echo probe in place for quick health checks
+  // --- Stage 0: basic body read / tiny validation
+  const body = req.body || {};
+  const {
+    fileName,
+    blobUrl,
+    pages,
+    color,   // "bw" | "color" | "Black & White" | etc
+    duplex,  // "Yes"/"No" or boolean-ish
+  } = body;
+
+  // If this looks like a pure probe / or clearly not a job payload, echo it
+  const looksLikeProbe =
+    !fileName && !blobUrl && (body.ping || Object.keys(body).length <= 2);
+  if (looksLikeProbe) {
+    safeReply(context, 200, "echo-v2", { ok: true, method: req.method, echo: body });
+    return;
+  }
+
+  // --- Stage 1: parse Authorization header robustly
+  // Accept "authorization" or "Authorization"
+  const rawAuth =
+    req.headers?.authorization ?? req.headers?.Authorization ?? "";
+
+  // Regex will only match if there is *something* after "Bearer"
+  const m = /^Bearer\s+(.+)$/.exec(rawAuth);
+  const token = m?.[1]?.trim();
+
+  // IMPORTANT:
+  // If there is NO header, or header is "Bearer" with nothing after it,
+  // we DO NOT 401. We just respond with an echo so your front-end can keep testing.
+  // (Production: you can change this to return 401 if you prefer.)
+  if (!rawAuth || !token) {
     safeReply(context, 200, "echo-v2", {
       ok: true,
-      method: req.method || "POST",
-      echo: req.body ?? {},
+      method: req.method,
+      echo: body,
+      note: "no_bearer_header_or_empty",
     });
     return;
   }
 
-  // ---------- Try to import libs ----------
-  let getUser, getPool, getSql;
+  // --- Stage 2: verify token when present
+  let user = null;
   try {
-    ({ getUser } = await import("../lib/jwt.js"));   // <-- your path
-    ({ getPool, getSql } = await import("../lib/sql.js")); // <-- your path
-  } catch (e) {
-    safeReply(context, 500, "crash-import", {
-      error: "import_failed",
-      detail: String(e?.message || e),
-    });
-    return;
-  }
-
-  // ---------- Verify token ----------
-  const m = /^Bearer\s+(.+)$/i.exec(authHeader);
-  const token = m?.[1];
-  if (!token) {
-    safeReply(context, 401, "auth-v1", { error: "no_token" });
-    return;
-  }
-
-  let user;
-  try {
-    user = await getUser(token); // should return { id, email, ... }
-    if (!user?.id) throw new Error("getUser returned no id");
+    user = getUser(token); // { id, email, is_operator, ... }
+    if (!user?.id) throw new Error("no_sub");
   } catch (e) {
     safeReply(context, 401, "auth-v1", {
       error: "auth_failed",
-      detail: String(e?.message || e),
+      detail: "invalid_token",
     });
     return;
   }
 
-  // ---------- Validate body & insert job ----------
-  const { fileName, blobUrl, pages, color, duplex } = coerceIncoming(req.body);
-
-  if (!fileName || !blobUrl) {
-    safeReply(context, 400, "auth-v1", {
+  // --- Stage 3: validate job payload now that we have a user
+  if (!fileName || !blobUrl || !pages) {
+    safeReply(context, 400, "validate-v1", {
       error: "bad_request",
-      detail: "fileName and blobUrl are required",
+      detail: "fileName, blobUrl, pages are required",
     });
     return;
   }
 
-  try {
-    const pool = await getPool();
-    const sql = getSql();
+  // Normalize a couple of fields so your DB code is easier later
+  const normColor = (() => {
+    const s = String(color ?? "").toLowerCase();
+    if (s.includes("color")) return 1; // bit 1
+    return 0; // bit 0
+  })();
+  const normDuplex = (() => {
+    const s = String(duplex ?? "").toLowerCase();
+    if (s.startsWith("y") || s === "true" || s === "1") return 1;
+    return 0;
+  })();
 
-    // Insert the job and return the inserted row
-    const result = await pool.request()
-      .input("user_id",     sql.Int,  user.id)
-      .input("file_name",   sql.NVarChar, fileName)
-      .input("storage_url", sql.NVarChar, blobUrl)
-      .input("pages",       sql.Int, pages)
-      .input("color",       sql.Bit, color ? 1 : 0)
-      .input("duplex",      sql.Bit, duplex ? 1 : 0)
-      .input("status",      sql.NVarChar, "queued")
-      .query(`
-        INSERT INTO dbo.Jobs (user_id, file_name, storage_url, pages, color, duplex, status, created_at)
-        OUTPUT inserted.*
-        VALUES (@user_id, @file_name, @storage_url, @pages, @color, @duplex, @status, SYSUTCDATETIME());
-      `);
+  // --- Stage 4: (placeholder) queue job / insert to DB
+  // Keep it simple for now so you can see success from the front-end.
+  // You can replace this block with your real SQL insert later.
 
-    const row = result.recordset?.[0] || null;
-    safeReply(context, 200, "auth-v1", { ok: true, job: row });
-  } catch (e) {
-    safeReply(context, 500, "auth-v1", {
-      error: "sql_error",
-      detail: String(e?.message || e),
-    });
-  }
+  // Example fake job row
+  const job = {
+    id: Date.now(), // placeholder
+    user_id: user.id,
+    file_name: fileName,
+    storage_url: blobUrl,
+    pages: Number(pages) || 1,
+    color: normColor,
+    duplex: normDuplex,
+    status: "queued",
+    pickup_code: null,
+    created_at: new Date().toISOString(),
+  };
+
+  safeReply(context, 201, "job-created-v1", { ok: true, job });
 }
