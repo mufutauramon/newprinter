@@ -26,7 +26,7 @@ export default async function (context, req) {
     // Do the import *inside* the handler so a bad import won't crash at load time
     let getUser;
     try {
-      ({ getUser } = await import("../../lib/jwt.js"));
+      ({ getUser } = await import("../lib/jwt.js"));
     } catch (e) {
       safeReply(500, "crash-import", {
         error: "import_failed",
