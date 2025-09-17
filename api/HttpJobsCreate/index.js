@@ -1,24 +1,38 @@
 // api/HttpJobsCreate/index.js
-// SAFE, SURGICAL UPDATE: keeps your existing getUser + (optional) SQL code.
-// It only returns clean JSON errors instead of blank 500s.
-
-import { getUser } from "../../lib/jwt.js";          // your existing helper
-// If you already use SQL here, keep your imports:
-// import { getPool, getSql } from "../../lib/sql.js";
+// Robust version: handles CORS, echo, and lazy-loads getUser so top-level import
+// can’t crash the function before we respond.
 
 export default async function (context, req) {
-  // ---- 0) quick probe (no auth, no DB) so we can test easily
-  if (req?.body && req.body.ping) {
-    context.res = {
-      status: 200,
-      headers: { "content-type": "application/json", "x-rpn-stage": "echo-v1" },
-      body: { ok: true, stage: "echo-v1", method: req.method || "POST", echo: req.body }
-    };
+  // ---- CORS & common headers
+  const baseHeaders = {
+    "content-type": "application/json; charset=utf-8",
+    "access-control-allow-origin": "*",
+    "access-control-allow-methods": "GET,POST,OPTIONS",
+    "access-control-allow-headers": "authorization,content-type",
+  };
+
+  // ---- 1) Handle preflight
+  if (req.method === "OPTIONS") {
+    context.res = { status: 204, headers: baseHeaders };
     return;
   }
 
+  // ---- 2) Ultra-safe echo path (no auth, no DB, no imports)
   try {
-    // ---- 1) basic header check (before calling getUser)
+    if (req?.body && req.body.ping) {
+      context.res = {
+        status: 200,
+        headers: { ...baseHeaders, "x-rpn-stage": "echo-v2" },
+        body: { ok: true, stage: "echo-v2", method: req.method || "POST", echo: req.body },
+      };
+      return;
+    }
+  } catch (e) {
+    // even echo should not explode; fall through to error below
+  }
+
+  try {
+    // ---- 3) Basic Authorization header check (still BEFORE we import jwt)
     const auth =
       req.headers?.authorization ||
       req.headers?.Authorization ||
@@ -27,22 +41,36 @@ export default async function (context, req) {
     if (!auth || !auth.startsWith("Bearer ")) {
       context.res = {
         status: 401,
-        headers: { "content-type": "application/json" },
-        body: { error: "no_user", detail: "Missing or invalid Authorization header" }
+        headers: baseHeaders,
+        body: { error: "no_user", detail: "Missing or invalid Authorization header" },
       };
       return;
     }
 
-    // ---- 2) call your existing getUser (if it throws, we catch below)
+    // ---- 4) Lazy-load getUser to avoid top-level import crashes
+    let getUser;
+    try {
+      ({ getUser } = await import("../../lib/jwt.js"));
+    } catch (impErr) {
+      context.log.error("Failed to import jwt.js:", impErr);
+      context.res = {
+        status: 500,
+        headers: baseHeaders,
+        body: { error: "server_error", detail: "JWT module failed to load" },
+      };
+      return;
+    }
+
+    // ---- 5) Verify token
     let user;
     try {
-      user = getUser(req); // your original function
+      user = getUser(req);
     } catch (e) {
       context.log.error("getUser failed:", e);
       context.res = {
         status: 401,
-        headers: { "content-type": "application/json" },
-        body: { error: "invalid_token", detail: e?.message || "Token verification failed" }
+        headers: baseHeaders,
+        body: { error: "invalid_token", detail: e?.message || "Token verification failed" },
       };
       return;
     }
@@ -50,70 +78,42 @@ export default async function (context, req) {
     if (!user || (!user.id && !user.sub)) {
       context.res = {
         status: 401,
-        headers: { "content-type": "application/json" },
-        body: { error: "no_user", detail: "Token decoded but no user id/sub present" }
+        headers: baseHeaders,
+        body: { error: "no_user", detail: "Token decoded but no user id/sub present" },
       };
       return;
     }
 
-    // ---- 3) validate request payload (so we return 400 instead of 500 on bad data)
+    // ---- 6) Validate incoming job payload early
     const { fileName, blobUrl, pages, color, duplex } = req.body || {};
     if (!fileName || !blobUrl) {
       context.res = {
         status: 400,
-        headers: { "content-type": "application/json" },
-        body: { error: "bad_request", detail: "fileName and blobUrl are required" }
+        headers: baseHeaders,
+        body: { error: "bad_request", detail: "fileName and blobUrl are required" },
       };
       return;
     }
 
-    // ---- 4) If you already had SQL insert logic, keep it here.
-    // Example shape (do NOT change your existing working code):
-    /*
-    const pool = await getPool();
-    const sql  = getSql();
-    const result = await pool.request()
-      .input("user_id", sql.Int, user.id ?? parseInt(user.sub, 10))
-      .input("file_name", sql.NVarChar(255), fileName)
-      .input("storage_url", sql.NVarChar(sql.MAX), blobUrl)
-      .input("pages", sql.Int, Number(pages || 1))
-      .input("color", sql.Bit, (String(color).toLowerCase().includes("color") ? 1 : 0))
-      .input("duplex", sql.Bit, (String(duplex).toLowerCase().startsWith("y") ? 1 : 0))
-      .query(`
-        INSERT INTO dbo.Jobs (user_id, file_name, storage_url, pages, color, duplex, status, created_at)
-        OUTPUT INSERTED.*
-        VALUES (@user_id, @file_name, @storage_url, @pages, @color, @duplex, 'Queued', SYSUTCDATETIME())
-      `);
-
-    const row = result.recordset?.[0];
+    // ---- 7) TODO: your existing SQL insert goes here (unchanged).
+    // Keep your current DB code; when ready, drop it back in this block.
+    // For now, return a temp success so the frontend can continue.
     context.res = {
       status: 200,
-      headers: { "content-type": "application/json" },
-      body: row || { ok: true }  // return the inserted job row
-    };
-    return;
-    */
-
-    // ---- 5) TEMP success (while we isolate auth): remove once SQL is back
-    context.res = {
-      status: 200,
-      headers: { "content-type": "application/json" },
+      headers: { ...baseHeaders, "x-rpn-stage": "auth-ok" },
       body: {
         ok: true,
         received: { fileName, blobUrl, pages, color, duplex },
-        user: { id: user.id ?? user.sub ?? null, email: user.email ?? null }
-      }
+        user: { id: user.id ?? user.sub ?? null, email: user.email ?? null },
+      },
     };
   } catch (err) {
-    // ---- 6) final safety net: always return JSON, never blank 500
+    // ---- 8) Final guard: always return JSON
     context.log.error("HttpJobsCreate fatal error:", err);
     context.res = {
       status: 500,
-      headers: { "content-type": "application/json" },
-      body: {
-        error: "server_error",
-        detail: err?.message || String(err)
-      }
+      headers: baseHeaders,
+      body: { error: "server_error", detail: err?.message || String(err) },
     };
   }
 }
