@@ -1,119 +1,63 @@
 // api/HttpJobsCreate/index.js
-// Robust version: handles CORS, echo, and lazy-loads getUser so top-level import
-// can’t crash the function before we respond.
+import { getUser } from "../../lib/jwt.js";
 
 export default async function (context, req) {
-  // ---- CORS & common headers
-  const baseHeaders = {
-    "content-type": "application/json; charset=utf-8",
-    "access-control-allow-origin": "*",
-    "access-control-allow-methods": "GET,POST,OPTIONS",
-    "access-control-allow-headers": "authorization,content-type",
-  };
-
-  // ---- 1) Handle preflight
-  if (req.method === "OPTIONS") {
-    context.res = { status: 204, headers: baseHeaders };
+  // ─────────────────────────────────────────────────────────────
+  // 1) ECHO path (health check) — leave this so we can always test
+  //    POST /api/jobs  body: { "ping": "hello" }
+  //    → returns { ok:true, stage:"echo-v2", echo:{...} }
+  // ─────────────────────────────────────────────────────────────
+  if (req?.body && typeof req.body === "object" && "ping" in req.body) {
+    context.res = {
+      headers: { "x-rpn-stage": "echo-v2" },
+      jsonBody: { ok: true, stage: "echo-v2", method: req.method, echo: req.body },
+    };
     return;
   }
 
-  // ---- 2) Ultra-safe echo path (no auth, no DB, no imports)
+  // ─────────────────────────────────────────────────────────────
+  // 2) AUTH-ONLY path (no DB yet)
+  //    Requires header: Authorization: Bearer <token from localStorage rp_token>
+  //    Returns the decoded user (id/email) if the token is valid.
+  // ─────────────────────────────────────────────────────────────
   try {
-    if (req?.body && req.body.ping) {
-      context.res = {
-        status: 200,
-        headers: { ...baseHeaders, "x-rpn-stage": "echo-v2" },
-        body: { ok: true, stage: "echo-v2", method: req.method || "POST", echo: req.body },
-      };
-      return;
-    }
-  } catch (e) {
-    // even echo should not explode; fall through to error below
-  }
-
-  try {
-    // ---- 3) Basic Authorization header check (still BEFORE we import jwt)
     const auth =
-      req.headers?.authorization ||
-      req.headers?.Authorization ||
-      null;
+      req.headers?.authorization || req.headers?.Authorization || "";
 
-    if (!auth || !auth.startsWith("Bearer ")) {
+    if (!auth.startsWith("Bearer ")) {
       context.res = {
         status: 401,
-        headers: baseHeaders,
-        body: { error: "no_user", detail: "Missing or invalid Authorization header" },
+        headers: { "x-rpn-stage": "auth-v1" },
+        jsonBody: { error: "no_user", detail: "Missing or invalid token" },
       };
       return;
     }
 
-    // ---- 4) Lazy-load getUser to avoid top-level import crashes
-    let getUser;
-    try {
-      ({ getUser } = await import("../../lib/jwt.js"));
-    } catch (impErr) {
-      context.log.error("Failed to import jwt.js:", impErr);
-      context.res = {
-        status: 500,
-        headers: baseHeaders,
-        body: { error: "server_error", detail: "JWT module failed to load" },
-      };
-      return;
-    }
+    const token = auth.slice("Bearer ".length).trim();
+    const user = await getUser(token); // expect something like { id, email, ... }
 
-    // ---- 5) Verify token
-    let user;
-    try {
-      user = getUser(req);
-    } catch (e) {
-      context.log.error("getUser failed:", e);
-      context.res = {
-        status: 401,
-        headers: baseHeaders,
-        body: { error: "invalid_token", detail: e?.message || "Token verification failed" },
-      };
-      return;
-    }
-
-    if (!user || (!user.id && !user.sub)) {
-      context.res = {
-        status: 401,
-        headers: baseHeaders,
-        body: { error: "no_user", detail: "Token decoded but no user id/sub present" },
-      };
-      return;
-    }
-
-    // ---- 6) Validate incoming job payload early
-    const { fileName, blobUrl, pages, color, duplex } = req.body || {};
-    if (!fileName || !blobUrl) {
-      context.res = {
-        status: 400,
-        headers: baseHeaders,
-        body: { error: "bad_request", detail: "fileName and blobUrl are required" },
-      };
-      return;
-    }
-
-    // ---- 7) TODO: your existing SQL insert goes here (unchanged).
-    // Keep your current DB code; when ready, drop it back in this block.
-    // For now, return a temp success so the frontend can continue.
     context.res = {
-      status: 200,
-      headers: { ...baseHeaders, "x-rpn-stage": "auth-ok" },
-      body: {
+      headers: { "x-rpn-stage": "auth-v1" },
+      jsonBody: {
         ok: true,
-        received: { fileName, blobUrl, pages, color, duplex },
-        user: { id: user.id ?? user.sub ?? null, email: user.email ?? null },
+        stage: "auth-v1",
+        method: req.method,
+        user: user ? { id: user.id, email: user.email } : null,
       },
     };
+    return;
   } catch (err) {
-    // ---- 8) Final guard: always return JSON
-    context.log.error("HttpJobsCreate fatal error:", err);
+    context.log("Auth error:", err);
     context.res = {
-      status: 500,
-      headers: baseHeaders,
-      body: { error: "server_error", detail: err?.message || String(err) },
+      status: 401,
+      headers: { "x-rpn-stage": "auth-v1" },
+      jsonBody: { error: "auth_failed", detail: String(err?.message || err) },
     };
+    return;
   }
+
+  // ─────────────────────────────────────────────────────────────
+  // 3) (NEXT STEP) DB write will go here after auth is confirmed.
+  //    We’ll add SQL only after we see X-RPN-STAGE: auth-v1 with 200.
+  // ─────────────────────────────────────────────────────────────
 }
