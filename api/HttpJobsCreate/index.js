@@ -3,6 +3,11 @@ import { getUser } from "../lib/jwt.js"; // <-- your path
 // If you’ll add SQL later, you can import here:
 // import { getPool, getSql } from "../../lib/sql.js";
 
+import { secretFingerprint } from "../lib/jwt.js"; // adjust path as needed
+
+context.log("JWT FP:", secretFingerprint());
+
+
 function safeReply(context, status, stage, body) {
   context.res = {
     status,
