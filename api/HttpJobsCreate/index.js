@@ -2,7 +2,7 @@ import { getUser } from "../../lib/jwt.js";
 
 export default async function (context, req) {
   try {
-    const user = getUser(req); // verifies JWT (uses JWT_SECRET)
+    const user = getUser(req); // verify JWT
     context.res = {
       status: 200,
       headers: { "content-type": "application/json" },
