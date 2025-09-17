@@ -7,7 +7,6 @@ import { secretFingerprint } from "../lib/jwt.js"; // adjust path as needed
 
 context.log("JWT FP:", secretFingerprint());
 
-
 function safeReply(context, status, stage, body) {
   context.res = {
     status,
