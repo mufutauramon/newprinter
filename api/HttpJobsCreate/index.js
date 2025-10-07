@@ -1,6 +1,6 @@
 // api/HttpJobsCreate/index.js
-import { getUser } from "../../lib/jwt.js";
-import { getPool, getSql } from "../../lib/sql.js";
+import { getUser } from "../lib/jwt.js";
+import { getPool, getSql } from "../lib/sql.js";
 
 function reply(context, status, body, stage = "") {
   context.res = {
