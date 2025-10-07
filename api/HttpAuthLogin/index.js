@@ -1,12 +1,8 @@
 // api/HttpAuthLogin/index.js
 import { getPool, getSql } from "../lib/sql.js";
 import { signJwt } from "../lib/jwt.js";
-//import { secretFingerprint } from "../lib/jwt.js"; // adjust path as needed
 
-//context.log("JWT FP:", secretFingerprint());
-
-
-function json(con. text, status, body) {
+function json(context, status, body) {
   context.res = { status, headers: { "content-type": "application/json" }, body };
 }
 
