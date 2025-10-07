@@ -1,10 +1,11 @@
 // api/HttpJobsCreate/index.js
-import { getUser, secretFingerprint } from "../lib/jwt.js"; // same lib as login/HttpMe
+import { getUser } from "../../lib/jwt.js";
+import { getPool, getSql } from "../../lib/sql.js";
 
-function safeReply(context, status, stage, body) {
+function reply(context, status, body, stage = "") {
   context.res = {
     status,
-    headers: { "x-rpn-stage": stage, "content-type": "application/json" },
+    headers: { "content-type": "application/json", "x-rpn-stage": stage },
     body: JSON.stringify(body ?? {}),
   };
 }
@@ -12,36 +13,43 @@ function safeReply(context, status, stage, body) {
 const pick = (...vals) => vals.find(v => v !== undefined && v !== null && v !== "");
 
 export default async function (context, req) {
-  // ---- Normalize body (accept a few aliases)
-  const b = req.body || {};
-  const fileName = pick(b.fileName, b.file_name, b.filename);
-  const blobUrl  = pick(b.blobUrl, b.blob_url, b.url, b.readUrl);
-  const pagesRaw = pick(b.pages, b.pagesEstimate, b.page_count);
-  const colorRaw = pick(b.color, b.colour, b?.meta?.color);
-  const duplexRaw= pick(b.duplex, b?.meta?.duplex);
-
-  // quick echo for probes
-  const looksLikeProbe = !fileName && !blobUrl && (b.ping || Object.keys(b).length <= 2);
-  if (looksLikeProbe) return safeReply(context, 200, "echo-v2", { ok: true, method: req.method, echo: b });
-
-  // ---- AUTH (strict). If it fails, include debug (no token contents)
-  const authHeader = req.headers?.authorization || req.headers?.Authorization || "";
-  const bearerMatch = /^Bearer\s+(.+)$/i.exec(authHeader);
-  const bearerToken = bearerMatch?.[1] || "";
   try {
-    // IMPORTANT: this must match the same SECRET as used by HttpAuthLogin
-    const user = getUser(req); // throws on invalid
-    // ---- Validate payload
-    const pages = Number(pagesRaw);
-    if (!fileName || !blobUrl || !Number.isFinite(pages) || pages <= 0) {
-      return safeReply(context, 400, "validate-v1", {
-        error: "bad_request",
-        detail: "fileName, blobUrl, pages (number > 0) are required",
-        got: { fileName, blobUrl, pages: pagesRaw }
-      });
+    // ---- 1) Parse + normalize request
+    const b = req.body || {};
+    const fileName = pick(b.fileName, b.file_name, b.filename);
+    const blobUrl  = pick(b.blobUrl, b.blob_url, b.url, b.readUrl);
+    const pagesRaw = pick(b.pages, b.pagesEstimate, b.page_count);
+    const colorRaw = pick(b.color, b.colour, b?.meta?.color);
+    const duplexRaw= pick(b.duplex, b?.meta?.duplex);
+
+    // quick probe support
+    const looksLikeProbe = !fileName && !blobUrl && (b.ping || Object.keys(b).length <= 2);
+    if (looksLikeProbe) return reply(context, 200, { ok: true, method: req.method, echo: b }, "echo");
+
+    // ---- 2) Auth (same style as HttpMe)
+    let user;
+    try {
+      user = getUser(req); // throws 401 on invalid/missing token
+    } catch (e) {
+      return reply(context, 401, { error: "auth_failed", detail: "invalid_token" }, "auth");
+    }
+    const uid = Number(user.sub || user.id);
+    if (!uid || Number.isNaN(uid)) {
+      return reply(context, 401, { error: "auth_failed", detail: "no_user_id" }, "auth");
     }
 
-    // normalize options
+    // ---- 3) Validate payload
+    const pages = Number(pagesRaw);
+    if (!fileName || !blobUrl || !Number.isFinite(pages) || pages <= 0) {
+      return reply(
+        context,
+        400,
+        { error: "bad_request", detail: "fileName, blobUrl, pages (number > 0) are required", got: { fileName, blobUrl, pages: pagesRaw } },
+        "validate"
+      );
+    }
+
+    // Normalize options (accepts "color"/"bw", "Yes"/"No", booleans, 1/0)
     const normColor = (() => {
       const s = String(colorRaw ?? "").toLowerCase();
       return (s.includes("color") || s === "true" || s === "1") ? 1 : 0;
@@ -51,31 +59,35 @@ export default async function (context, req) {
       return (s.startsWith("y") || s === "true" || s === "1") ? 1 : 0;
     })();
 
-    // placeholder job (swap for SQL later)
-    const job = {
-      id: Date.now(),
-      user_id: user.id,
-      file_name: fileName,
-      storage_url: blobUrl,
-      pages,
-      color: normColor,
-      duplex: normDuplex,
-      status: "queued",
-      pickup_code: null,
-      created_at: new Date().toISOString(),
-    };
+    // ---- 4) Insert job (TEMP: no subscription deduction)
+    const sql  = getSql();
+    const pool = await getPool();
 
-    return safeReply(context, 201, "job-created-v1", { ok: true, job });
-  } catch (e) {
-    // show *useful* debug so you can fix env/config quickly
-    return safeReply(context, 401, "auth-v1", {
-      error: "auth_failed",
-      detail: String(e?.message || e),
-      sawAuthHeader: !!authHeader,
-      bearerLength: bearerToken ? bearerToken.length : 0,
-      // these help you verify BOTH functions use the SAME secret
-      jwtSecretFp: secretFingerprint(),              // from this function's env
-      hint: "Ensure JWT_SECRET matches HttpAuthLogin and that the client sends Authorization: Bearer <token> to /api/jobs"
-    });
+    const pickup = Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit
+    const ins = await pool
+      .request()
+      .input("uid", sql.Int, uid)
+      .input("fn",  sql.NVarChar(260),  fileName)
+      .input("url", sql.NVarChar(2048), blobUrl)
+      .input("pg",  sql.Int,            pages)
+      .input("clr", sql.Bit,            normColor)
+      .input("dx",  sql.Bit,            normDuplex)
+      .input("pc",  sql.VarChar(12),    pickup)
+      .query(`
+        INSERT INTO Jobs (user_id, file_name, storage_url, pages, color, duplex, pickup_code, status, created_at)
+        OUTPUT inserted.id, inserted.user_id, inserted.file_name, inserted.storage_url,
+               inserted.pages, inserted.color, inserted.duplex, inserted.status,
+               inserted.pickup_code, inserted.created_at
+        VALUES (@uid, @fn, @url, @pg, @clr, @dx, @pc, 'Queued', SYSUTCDATETIME());
+      `);
+
+    const row = ins.recordset?.[0] || null;
+    if (!row) return reply(context, 500, { error: "insert_failed" }, "db");
+
+    // ---- 5) Success (201)
+    return reply(context, 201, { ok: true, job: row }, "job-created");
+  } catch (err) {
+    context.log?.error?.("HttpJobsCreate error", err);
+    return reply(context, 500, { error: "server_error", detail: String(err?.message || err) }, "catch");
   }
 }
