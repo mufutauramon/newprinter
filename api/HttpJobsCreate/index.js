@@ -1,11 +1,7 @@
 // api/HttpJobsCreate/index.js
-//import { getUser } from "../lib/jwt.js"; // <-- your path
+import { getUser } from "../../lib/jwt.js";         // <— same style as HttpMe
 // If you’ll add SQL later, you can import here:
 // import { getPool, getSql } from "../../lib/sql.js";
-
-//import { secretFingerprint } from "../lib/jwt.js"; // adjust path as needed
-
-//context.log("JWT FP:", secretFingerprint());
 
 function safeReply(context, status, stage, body) {
   context.res = {
@@ -15,93 +11,71 @@ function safeReply(context, status, stage, body) {
   };
 }
 
+function pickFirst(...vals) {
+  for (const v of vals) if (v !== undefined && v !== null && v !== "") return v;
+  return undefined;
+}
+
 export default async function (context, req) {
-  // --- Stage 0: basic body read / tiny validation
-  const body = req.body || {};
-  const {
-    fileName,
-    blobUrl,
-    pages,
-    color,   // "bw" | "color" | "Black & White" | etc
-    duplex,  // "Yes"/"No" or boolean-ish
-  } = body;
+  // ---- Stage 0: read + normalize body
+  const b = req.body || {};
+  const fileName = pickFirst(b.fileName, b.file_name, b.filename);
+  const blobUrl  = pickFirst(b.blobUrl, b.blob_url, b.url, b.readUrl);
+  const pagesRaw = pickFirst(b.pages, b.pagesEstimate, b.page_count);
+  const colorRaw = pickFirst(b.color, b.colour, (b.meta && b.meta.color));
+  const duplexRaw= pickFirst(b.duplex, (b.meta && b.meta.duplex));
 
-  // If this looks like a pure probe / or clearly not a job payload, echo it
+  // Probe/echo for tiny bodies (keeps your helpful dev behavior)
   const looksLikeProbe =
-    !fileName && !blobUrl && (body.ping || Object.keys(body).length <= 2);
+    !fileName && !blobUrl && (b.ping || Object.keys(b).length <= 2);
   if (looksLikeProbe) {
-    safeReply(context, 200, "echo-v2", { ok: true, method: req.method, echo: body });
+    safeReply(context, 200, "echo-v2", { ok: true, method: req.method, echo: b });
     return;
   }
 
-  // --- Stage 1: parse Authorization header robustly
-  // Accept "authorization" or "Authorization"
-  const rawAuth =
-    req.headers?.authorization ?? req.headers?.Authorization ?? "";
-
-  // Regex will only match if there is *something* after "Bearer"
-  const m = /^Bearer\s+(.+)$/.exec(rawAuth);
-  const token = m?.[1]?.trim();
-
-  // IMPORTANT:
-  // If there is NO header, or header is "Bearer" with nothing after it,
-  // we DO NOT 401. We just respond with an echo so your front-end can keep testing.
-  // (Production: you can change this to return 401 if you prefer.)
-  if (!rawAuth || !token) {
-    safeReply(context, 200, "echo-v2", {
-      ok: true,
-      method: req.method,
-      echo: body,
-      note: "no_bearer_header_or_empty",
-    });
-    return;
-  }
-
-  // --- Stage 2: verify token when present
-  let user = null;
+  // ---- Stage 1: auth (same approach as HttpMe)
+  let user;
   try {
-    user = getUser(token); // { id, email, is_operator, ... }
-    if (!user?.id) throw new Error("no_sub");
+    user = getUser(req); // must throw if invalid/missing
   } catch (e) {
-    safeReply(context, 401, "auth-v1", {
-      error: "auth_failed",
-      detail: "invalid_token",
-    });
+    safeReply(context, 401, "auth-v1", { error: "auth_failed", detail: "invalid_token" });
     return;
   }
 
-  // --- Stage 3: validate job payload now that we have a user
-  if (!fileName || !blobUrl || !pages) {
+  // ---- Stage 2: validate payload
+  const pages = Number(pagesRaw);
+  if (!fileName || !blobUrl || !Number.isFinite(pages) || pages <= 0) {
     safeReply(context, 400, "validate-v1", {
       error: "bad_request",
-      detail: "fileName, blobUrl, pages are required",
+      detail: "fileName, blobUrl, pages (number > 0) are required",
+      got: { fileName, blobUrl, pages: pagesRaw }
     });
     return;
   }
 
-  // Normalize a couple of fields so your DB code is easier later
+  // ---- Stage 3: normalize options
   const normColor = (() => {
-    const s = String(color ?? "").toLowerCase();
-    if (s.includes("color")) return 1; // bit 1
-    return 0; // bit 0
+    const s = String(colorRaw ?? "").toLowerCase();
+    // accepts "color", true-like strings, or 1
+    if (s.includes("color") || s === "true" || s === "1") return 1;
+    return 0;
   })();
+
   const normDuplex = (() => {
-    const s = String(duplex ?? "").toLowerCase();
+    const s = String(duplexRaw ?? "").toLowerCase();
+    // accepts "yes", "true", "1"
     if (s.startsWith("y") || s === "true" || s === "1") return 1;
     return 0;
   })();
 
-  // --- Stage 4: (placeholder) queue job / insert to DB
-  // Keep it simple for now so you can see success from the front-end.
-  // You can replace this block with your real SQL insert later.
-
-  // Example fake job row
+  // ---- Stage 4: (placeholder) create/queue job
+  // Replace this with your SQL insert later.
   const job = {
     id: Date.now(), // placeholder
     user_id: user.id,
     file_name: fileName,
     storage_url: blobUrl,
-    pages: Number(pages) || 1,
+    pages,
     color: normColor,
     duplex: normDuplex,
     status: "queued",
