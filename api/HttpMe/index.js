@@ -1,5 +1,5 @@
-import { getSqlPool } from '../../lib/sql.js';
-import { getUser } from '../../lib/jwt.js';
+import { getSqlPool } from '../lib/sql.js';
+import { getUser } from '../lib/jwt.js';
 
 export default async function (context, req) {
   try {

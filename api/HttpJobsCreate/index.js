@@ -1,5 +1,5 @@
 // api/HttpJobsCreate/index.js
-import { getUser } from "../../lib/jwt.js";         // <— same style as HttpMe
+import { getUser } from "../lib/jwt.js";         // <— same style as HttpMe
 // If you’ll add SQL later, you can import here:
 // import { getPool, getSql } from "../../lib/sql.js";
 
