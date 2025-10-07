@@ -362,6 +362,163 @@ async function afterSignInBoot() {
   await refreshQuota();
   await refreshJobs();
 }
+// ================= REMOTEPRINT NG: WIRE TO YOUR API =================
+
+// endpoints (your function folders)
+const ENDPOINTS = {
+  me:        "/api/HttpMe",           // GET  -> quota/plan info
+  jobsList:  "/api/HttpJobsList",     // GET  -> [{...jobs}]
+  blobSas:   "/api/HttpBlobSas",      // POST -> { uploadUrl, blobUrlPublic, quotaId? }
+  jobsCreate:"/api/HttpJobsCreate",   // POST -> { jobId }
+  price:     "/api/HttpPrice"         // POST -> { priceNaira }  (optional)
+};
+
+// element refs (match your HTML)
+const ui = {
+  // upload
+  file:     document.getElementById("fileInput"),
+  pages:    document.getElementById("pages"),
+  color:    document.getElementById("color"),
+  duplex:   document.getElementById("duplex"),
+  send:     document.getElementById("sendBtn"),
+  priceBtn: document.getElementById("priceBtn"),
+  priceOut: document.getElementById("priceOut"),
+  // quota
+  planName: document.getElementById("planName"),
+  remaining:document.getElementById("remaining"),
+  bar:      document.getElementById("quotaFill"),
+  // jobs
+  jobsBody: document.querySelector("#jobsTable tbody"),
+};
+
+// -------- QUOTA / ME --------
+async function refreshQuota() {
+  const res = await getJson(ENDPOINTS.me, { auth: true });
+  if (!res.ok) { return; }
+
+  // allow multiple shapes from backend
+  const d = res.data || {};
+  const planName  = d.planName || d.plan || "—";
+  const total     = d.pages_total ?? d.total ?? 0;
+  const used      = d.pages_used ?? d.used ?? 0;
+  const reserved  = d.pages_reserved ?? d.reserved ?? 0;
+  const remaining = d.available ?? d.remaining ?? Math.max(0, total - used - reserved);
+
+  ui.planName.textContent   = planName;
+  ui.remaining.textContent  = String(remaining);
+  ui.bar.style.width        = total ? `${Math.max(0, Math.min(100, Math.round((remaining/total)*100)))}%` : "0%";
+
+  // stash for later (e.g., quota_id if you return it)
+  window.__quota = d;
+}
+
+// -------- JOBS LIST --------
+async function refreshJobs() {
+  const res = await getJson(ENDPOINTS.jobsList, { auth: true });
+  if (!res.ok) { return; }
+
+  const list = Array.isArray(res.data) ? res.data : (res.data.jobs || []);
+  ui.jobsBody.innerHTML = "";
+  for (const j of list) {
+    const meta = j.meta_json ? (typeof j.meta_json === "string" ? JSON.parse(j.meta_json) : j.meta_json) : {};
+    const created = j.created_at || j.time || j.createdAt;
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${created ? new Date(created).toLocaleString() : "—"}</td>
+      <td>${j.filename || j.file_name || j.file || "—"}</td>
+      <td>${j.pages ?? j.page_count ?? "—"}</td>
+      <td>${(j.color ?? meta.color) ? "Color" : "B/W"} • ${(j.duplex ?? meta.duplex) ? "Duplex" : "Simplex"}</td>
+      <td>${j.status || "uploaded"}</td>
+      <td>${j.pickup_code || j.code || ""}</td>
+    `;
+    ui.jobsBody.appendChild(tr);
+  }
+}
+
+// -------- PRICE (server) --------
+async function getServerPrice() {
+  const pages = parseInt(ui.pages.value || "0", 10);
+  if (!pages) { ui.priceOut.textContent = "—"; return; }
+  const res = await postJson(ENDPOINTS.price, {
+    pages,
+    color:  ui.color.value === "color",
+    duplex: ui.duplex.value === "true"
+  }, { auth: true });
+  if (res.ok && typeof res.data?.priceNaira === "number") {
+    ui.priceOut.textContent = `₦ ${res.data.priceNaira.toLocaleString()}`;
+  } else {
+    // fallback client estimate if server not ready
+    const perSide = (ui.color.value === "color") ? 70 : 25;
+    ui.priceOut.textContent = `₦ ${(perSide * pages).toLocaleString()}`;
+  }
+}
+
+// -------- UPLOAD: get SAS → PUT blob → confirm --------
+async function sendToPrint() {
+  try {
+    if (!localStorage.getItem("rp_token")) { toast("Please sign in first.", "info"); return; }
+
+    const file  = ui.file.files[0];
+    const pages = parseInt(ui.pages.value || "0", 10);
+    if (!file || !pages) { toast("Choose a file and enter pages.", "info"); return; }
+
+    const isColor = ui.color.value === "color";
+    const isDuplex= ui.duplex.value === "true";
+
+    // 1) ask for SAS
+    const r1 = await postJson(ENDPOINTS.blobSas, {
+      filename: file.name,
+      contentType: file.type || "application/octet-stream",
+      pagesEstimate: pages
+    }, { auth: true });
+
+    if (!r1.ok) {
+      toast(r1.data?.error || "Could not get upload URL.", "error");
+      return;
+    }
+    const { uploadUrl, blobUrlPublic, quotaId } = r1.data;
+
+    // 2) upload to Blob
+    const put = await fetch(uploadUrl, {
+      method: "PUT",
+      headers: { "x-ms-blob-type": "BlockBlob", "content-type": file.type || "application/octet-stream" },
+      body: file
+    });
+    if (!put.ok) throw new Error("Upload to storage failed.");
+
+    // 3) confirm job (and reserve)
+    const r2 = await postJson(ENDPOINTS.jobsCreate, {
+      quotaId,                     // your API can ignore if it looks up active period
+      blobUrl: blobUrlPublic,
+      filename: file.name,
+      pages,
+      meta: { color: isColor, duplex: isDuplex, copies: 1 }
+    }, { auth: true });
+
+    if (!r2.ok) {
+      toast(r2.data?.error || "Unable to queue job.", "error");
+      return;
+    }
+
+    toast("Uploaded and queued.", "success");
+    await refreshQuota();
+    await refreshJobs();
+  } catch (e) {
+    console.error(e);
+    toast(e.message || "Upload error.", "error");
+  }
+}
+
+// wire buttons
+if (ui.send)     ui.send.addEventListener("click", sendToPrint);
+if (ui.priceBtn) ui.priceBtn.addEventListener("click", getServerPrice);
+
+// after sign-in (called by setSignedIn)
+async function afterSignInBoot() {
+  await refreshQuota();
+  await refreshJobs();
+}
+
 // ---------- boot ----------
 (function init() {
   const email = localStorage.getItem("rp_email");
