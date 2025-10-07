@@ -208,7 +208,160 @@ signOutBtn.addEventListener("click", () => {
 //     jobsTable.appendChild(tr);
 //   }
 // }
+// ---------- QUOTA + JOBS + UPLOAD (drop-in) ----------
 
+// tiny util to try multiple element ids/classes and return the first that exists
+function pickSel(...sels) { for (const s of sels) { const el = document.querySelector(s); if (el) return el; } return null; }
+
+// ELEMENT MAP (we’ll find whatever exists)
+const el = {
+  // quota card
+  planName:  pickSel("#planName", "#quota-plan"),
+  remaining: pickSel("#remaining", "#quota-remaining"),
+  bar:       pickSel("#quotaFill", "#quota-bar"),
+
+  // jobs table body
+  jobsBody:  pickSel("#jobsTable tbody", "#jobs-body"),
+
+  // upload form (we try several common ids)
+  file:      pickSel("#uploadFile", "#upload-file", "#file", "input[type=file]"),
+  pages:     pickSel("#uploadPages", "#upload-pages", "#pages", "input[type=number]"),
+  color:     pickSel("#uploadColor", "#upload-color", "#color"),
+  duplex:    pickSel("#uploadDuplex", "#upload-duplex", "#duplex"),
+  sendBtn:   pickSel("#sendBtn", "#btn-send", "#sendToPrint", "#btn-upload"),
+  msg:       pickSel("#uploadMsg", "#priceMsg", "#upload-msg")
+};
+
+// Fallback-friendly GET that can try two endpoints
+async function getAuthJsonTry(paths) {
+  for (const p of paths) {
+    const r = await getJson(p, { auth: true });
+    if (r.ok) return r;
+  }
+  return { ok: false, status: 404, data: { error: "not found" } };
+}
+
+// QUOTA
+async function refreshQuota() {
+  const res = await getAuthJsonTry(["/api/me/quota", "/api/quota"]);
+  if (!res.ok) return;
+
+  const d = res.data || {};
+  // normalize response shapes
+  const planName = d.planName || d.plan || "—";
+  const total = (d.pages_total ?? d.total ?? 0);
+  const used   = (d.pages_used ?? 0);
+  const reserved = (d.pages_reserved ?? 0);
+  const remaining = (d.available ?? d.remaining ?? Math.max(0, total - used - reserved));
+
+  if (el.planName)  el.planName.textContent  = planName;
+  if (el.remaining) el.remaining.textContent = String(remaining);
+  if (el.bar) {
+    const pct = total ? Math.max(0, Math.min(100, Math.round((remaining / total) * 100))) : 0;
+    el.bar.style.width = pct + "%";
+  }
+
+  // keep in memory if you need quota_id elsewhere
+  window.__quota = d;
+}
+
+// JOBS
+async function refreshJobs() {
+  const res = await getAuthJsonTry(["/api/me/jobs", "/api/jobs"]);
+  if (!res.ok || !el.jobsBody) return;
+
+  const list = Array.isArray(res.data) ? res.data : (res.data.jobs || []);
+  el.jobsBody.innerHTML = "";
+
+  for (const j of list) {
+    const time   = j.created_at || j.createdAt || j.time;
+    const name   = j.filename || j.file_name || j.file || "—";
+    const pages  = j.pages ?? j.page_count ?? "—";
+    const color  = (j.color ?? (j.meta_json?.color)) ? "Color" : "B/W";
+    const duplex = (j.duplex ?? (j.meta_json?.duplex)) ? "Duplex" : "Simplex";
+    const status = j.status || "uploaded";
+    const code   = j.pickup_code || j.code || "";
+
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${time ? new Date(time).toLocaleString() : "—"}</td>
+      <td>${name}</td>
+      <td>${pages}</td>
+      <td>${color} • ${duplex}</td>
+      <td>${status}</td>
+      <td>${code}</td>
+    `;
+    el.jobsBody.appendChild(tr);
+  }
+}
+
+// UPLOAD: ask SAS → PUT blob → confirm (reserve pages + create job)
+async function sendToPrint() {
+  try {
+    if (!localStorage.getItem("rp_token")) {
+      toast("Please sign in first.", "info");
+      return;
+    }
+    if (!el.file || !el.pages) {
+      toast("Upload controls not found on the page.", "error");
+      return;
+    }
+
+    const file  = el.file.files[0];
+    const pages = parseInt((el.pages.value || "0"), 10);
+    if (!file || !pages) { toast("Choose a file and enter pages.", "info"); return; }
+
+    const color  = (el.color?.value || "Black & White"); // "Black & White" / "Color"
+    const duplex = ((el.duplex?.value || "No") === "Yes");
+
+    // 1) get SAS
+    const r1 = await postJson("/api/jobs/upload-url",
+      { filename: file.name, contentType: file.type || "application/octet-stream", pagesEstimate: pages },
+      { auth: true }
+    );
+    if (!r1.ok) {
+      toast(r1.data?.error || "Failed to start upload.", "error");
+      return;
+    }
+    const { uploadUrl, blobUrlPublic, quotaId } = r1.data;
+
+    // 2) direct-to-blob upload
+    const put = await fetch(uploadUrl, {
+      method: "PUT",
+      headers: { "x-ms-blob-type": "BlockBlob", "content-type": file.type || "application/octet-stream" },
+      body: file
+    });
+    if (!put.ok) throw new Error("Upload to storage failed");
+
+    // 3) confirm
+    const r2 = await postJson("/api/jobs/confirm",
+      { quotaId, blobUrl: blobUrlPublic, filename: file.name, pages, meta: { color, duplex, copies: 1 } },
+      { auth: true }
+    );
+    if (!r2.ok) {
+      toast(r2.data?.error || "Confirm failed.", "error");
+      return;
+    }
+
+    toast("Uploaded and queued for printing.", "success");
+    await refreshQuota();
+    await refreshJobs();
+    if (el.msg) el.msg.textContent = "";
+  } catch (e) {
+    console.error(e);
+    toast(e.message || "Upload error.", "error");
+    if (el.msg) el.msg.textContent = e.message || "Upload error.";
+  }
+}
+
+// hook the button if present
+if (el.sendBtn) el.sendBtn.addEventListener("click", sendToPrint);
+
+// When signed in, refresh quota + jobs automatically
+async function afterSignInBoot() {
+  await refreshQuota();
+  await refreshJobs();
+}
 // ---------- boot ----------
 (function init() {
   const email = localStorage.getItem("rp_email");
