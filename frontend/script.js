@@ -170,13 +170,14 @@ signOutBtn.addEventListener("click", () => {
 
 // ================= REMOTEPRINT NG: DASHBOARD WIRING =================
 
-// backend endpoints
+// endpoints (match your function.json + handlers)
 const ENDPOINTS = {
-  me:        "/api/HttpMe",           // GET  -> { email, subscription:{ pages_remaining, plan, quota_pages } }
-  jobsList:  "/api/HttpJobsList",     // GET  -> [{...jobs}]  (assumed)
-  blobSas:   "/api/blob/sas",         // POST -> { uploadUrl, blobUrl, blobName }  <-- from function.json
-  jobsCreate:"/api/HttpJobsCreate",   // POST -> { jobId }    (assumed)
-  price:     "/api/HttpPrice"         // POST -> { priceNaira }  (optional)
+  me:        "/api/HttpMe",       // GET  -> { email, subscription:{ pages_remaining, plan, quota_pages } }
+  jobsList:  "/api/HttpJobsList", // GET  -> [{...}]  (fallback to /api/jobs if 404)
+  jobsListAlt: "/api/jobs",       // GET  -> may echo; we'll still try
+  blobSas:   "/api/blob/sas",     // POST -> { uploadUrl, blobUrl, blobName }
+  jobs:      "/api/jobs",         // POST -> { fileName, blobUrl, pages, color, duplex }  (auth)
+  price:     "/api/HttpPrice"     // POST -> { priceNaira } (optional)
 };
 
 // ---- QUOTA (adapts to HttpMe shape) ----
@@ -213,15 +214,24 @@ async function refreshQuota() {
   window.__quota = { planName, total, remaining };
 }
 
-// ---- JOBS (generic) ----
+// ---- JOBS LIST (try HttpJobsList, then /api/jobs) ----
 async function refreshJobs() {
-  const res = await getJson(ENDPOINTS.jobsList, { auth: true });
+  let res = await getJson(ENDPOINTS.jobsList, { auth: true });
+  if (!res.ok && res.status === 404) {
+    res = await getJson(ENDPOINTS.jobsListAlt, { auth: true });
+  }
   if (!res.ok) {
-    console.error("HttpJobsList error", res.status, res.data);
+    console.error("Jobs list error", res.status, res.data);
     return;
   }
 
+  // Prefer array; otherwise check res.data.jobs
   const list = Array.isArray(res.data) ? res.data : (res.data.jobs || []);
+  if (!Array.isArray(list)) {
+    // If it's the echo from your POST handler, just skip rendering
+    return;
+  }
+
   jobsTable.innerHTML = "";
   for (const j of list) {
     const meta = j.meta_json ? (typeof j.meta_json === "string" ? JSON.parse(j.meta_json) : j.meta_json) : {};
@@ -257,7 +267,7 @@ $("#priceBtn")?.addEventListener("click", async () => {
   }
 });
 
-// ---- Upload: get SAS → PUT blob → confirm ----
+// ---- Upload: /api/blob/sas (anon) -> PUT -> /api/jobs (auth) ----
 async function sendToPrint() {
   try {
     if (!localStorage.getItem("rp_token")) { toast("Please sign in first.", "info"); return; }
@@ -266,10 +276,11 @@ async function sendToPrint() {
     const pages = parseInt($("#pages").value || "0", 10);
     if (!file || !pages) { toast("Choose a file and enter pages.", "info"); return; }
 
-    const isColor  = $("#color").value === "color";
-    const isDuplex = $("#duplex").value === "true";
+    // your HttpJobsCreate normalizes strings like "color"/"bw" and "Yes"/"No"
+    const color   = $("#color").value;              // "bw" or "color"
+    const duplex  = $("#duplex").value === "true" ? "Yes" : "No"; // send "Yes"/"No" to be safe
 
-    // 1) ask backend for SAS — EXACT route from function.json; anonymous (no auth)
+    // 1) SAS (anonymous)
     const r1 = await postJson(ENDPOINTS.blobSas, {
       fileName: file.name,
       contentType: file.type || "application/octet-stream"
@@ -280,9 +291,9 @@ async function sendToPrint() {
       toast(r1.data?.error || r1.data?.message || `Could not get upload URL (status ${r1.status})`, "error");
       return;
     }
-    const { uploadUrl, blobUrl, blobName } = r1.data;
+    const { uploadUrl, blobUrl } = r1.data;
 
-    // 2) upload to Blob
+    // 2) Upload to Blob
     const put = await fetch(uploadUrl, {
       method: "PUT",
       headers: { "x-ms-blob-type": "BlockBlob", "content-type": file.type || "application/octet-stream" },
@@ -290,17 +301,17 @@ async function sendToPrint() {
     });
     if (!put.ok) throw new Error(`Upload to storage failed (status ${put.status})`);
 
-    // 3) confirm job — adjust if your HttpJobsCreate expects different keys
-    const r2 = await postJson(ENDPOINTS.jobsCreate, {
-      blobUrl,                 // read-enabled URL
-      filename: file.name,
+    // 3) Confirm job (authorized) — EXACT keys your handler checks
+    const r2 = await postJson(ENDPOINTS.jobs, {
+      fileName: file.name,
+      blobUrl,         // read-enabled URL from SAS
       pages,
-      meta: { color: isColor, duplex: isDuplex, copies: 1 },
-      blobName
+      color,           // "bw" or "color" (your code will lower-case and map)
+      duplex           // "Yes" or "No" (your code handles several truthy strings)
     }, { auth: true });
 
     if (!r2.ok) {
-      console.error("HttpJobsCreate error", r2.status, r2.data);
+      console.error("POST /api/jobs error", r2.status, r2.data);
       toast(r2.data?.error || r2.data?.message || "Unable to queue job.", "error");
       return;
     }
