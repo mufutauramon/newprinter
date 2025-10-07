@@ -6,7 +6,7 @@ import { signJwt } from "../lib/jwt.js";
 //context.log("JWT FP:", secretFingerprint());
 
 
-function json(context, status, body) {
+function json(con. text, status, body) {
   context.res = { status, headers: { "content-type": "application/json" }, body };
 }
 
