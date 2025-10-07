@@ -51,9 +51,9 @@ function setSignedIn(email) {
   $("#dash").classList.toggle("hidden", !email);
 
   if (email) {
-    // refresh quota and jobs when signed in
-    refreshQuota();
-    refreshJobs();
+    // when you’re ready: refresh quota and jobs here
+    // refreshQuota();
+    // refreshJobs();
   }
 }
 
@@ -77,18 +77,11 @@ const signupClose  = $("#signupClose");
 const signupCancel = $("#signupCancel");
 const signupSubmit = $("#signupSubmit");
 
-// quota / jobs
+// quota / jobs (placeholders for later)
 const planNameEl = $("#planName");
 const remainingEl= $("#remaining");
 const quotaFill  = $("#quotaFill");
 const jobsTable  = $("#jobsTable tbody");
-
-// ---------- upload elements (NEW) ----------
-const fileEl   = $("#fileInput"); // <-- updated to match your HTML
-const pagesEl  = $("#pages");
-const colorEl  = $("#color");
-const duplexEl = $("#duplex");
-const sendBtn  = $("#sendBtn");
 
 // ---------- plan helpers ----------
 function currentPlan() {
@@ -171,8 +164,8 @@ subscribeBtn.addEventListener("click", async () => {
   const res = await postJson("/api/subscribe", { planName }, { auth: true });
   if (res.ok) {
     toast(`Subscription set to ${planName}.`, "success");
-    // refresh quota after subscription
-    refreshQuota();
+    // when you’re ready, refresh quota UI:
+    // refreshQuota();
   } else {
     toast(`Failed to update plan (${res.status}).`, "error");
     console.error("subscribe", res.data);
@@ -187,133 +180,34 @@ signOutBtn.addEventListener("click", () => {
   toast("Signed out.", "success");
 });
 
-// ---------- quota + jobs loaders ----------
-async function refreshQuota() {
-  const res = await getJson("/api/me/quota", { auth: true });
-  if (!res.ok) return;
-  const { plan, remaining, total } = res.data;
-  planNameEl.textContent = plan || "—";
-  remainingEl.textContent = String(remaining ?? 0);
-  const pct = total ? Math.max(0, Math.min(100, Math.round((remaining / total) * 100))) : 0;
-  quotaFill.style.width = pct + "%";
-}
+// ---------- (optional) quota + jobs loaders you can wire later ----------
+// async function refreshQuota() {
+//   const res = await getJson("/api/me/quota", { auth: true });
+//   if (!res.ok) return;
+//   const { plan, remaining, total } = res.data;
+//   planNameEl.textContent = plan || "—";
+//   remainingEl.textContent = String(remaining ?? 0);
+//   const pct = total ? Math.max(0, Math.min(100, Math.round((remaining / total) * 100))) : 0;
+//   quotaFill.style.width = pct + "%";
+// }
 
-function jobRow(j) {
-  const tr = document.createElement("tr");
-  const link = j.storage_url
-    ? `<a href="${j.storage_url}" target="_blank" rel="noopener">${j.file_name}</a>`
-    : `${j.file_name}`;
-  tr.innerHTML = `
-    <td>${new Date(j.created_at).toLocaleString()}</td>
-    <td>${link}</td>
-    <td>${j.pages}</td>
-    <td>${(j.color ? "Color" : "B/W")} • ${j.duplex ? "Duplex" : "Simplex"}</td>
-    <td>${j.status}</td>
-    <td>${j.pickup_code || ""}</td>
-  `;
-  return tr;
-}
-
-async function refreshJobs() {
-  const res = await getJson("/api/jobs", { auth: true });
-  if (!res.ok) return;
-  jobsTable.innerHTML = "";
-  for (const j of res.data) jobsTable.appendChild(jobRow(j));
-}
-
-// ---------- Upload -> Blob -> Create Job (NEW) ----------
-const BLOB_SAS_URL = "/api/blob/sas"; // your new SAS function route
-
-async function requestSas(file) {
-  const res = await postJson("/api/blob/sas", {
-    fileName: file.name,
-    contentType: file.type || "application/octet-stream"
-  }, { auth: true });
-
-  if (!res.ok) {
-    console.error("[SAS] failed", res.status, res.data);
-    // show any backend error if present
-    const msg = res?.data?.error || res?.data?.raw || `HTTP ${res.status}`;
-    throw new Error(`SAS request failed: ${msg}`);
-  }
-  return res.data; // { uploadUrl, blobUrl, blobName }
-}
-
-
-async function putBlob(uploadUrl, file) {
-  const r = await fetch(uploadUrl, {
-    method: "PUT",
-    headers: {
-      "x-ms-blob-type": "BlockBlob",
-      "Content-Type": file.type || "application/octet-stream"
-    },
-    body: file
-  });
-  if (!r.ok) {
-    const t = await r.text();
-    throw new Error(`Blob upload failed (${r.status}): ${t}`);
-  }
-}
-
-function normalizeColorValue(str) {
-  // server treats 'color' => BIT 1; anything else => 0
-  const s = (str || "").toString().toLowerCase();
-  return s.includes("color") ? "color" : "bw";
-}
-
-async function uploadAndCreateJob() {
-  const token = localStorage.getItem("rp_token");
-  if (!token) return toast("Please sign in first.", "info");
-
-  const file = fileEl?.files?.[0];
-  if (!file) return toast("Choose a file to upload.", "info");
-
-  const btn = sendBtn;
-  const oldText = btn.textContent;
-  btn.disabled = true; btn.textContent = "Uploading…";
-
-  try {
-    // 1) SAS for this blob
-    const { uploadUrl, blobUrl } = await requestSas(file);
-
-    // 2) Upload to blob directly
-    await putBlob(uploadUrl, file);
-
-    // 3) Create job in SQL (your existing /api/jobs)
-    const payload = {
-      fileName: file.name,
-      blobUrl,
-      pages: pagesEl?.value || "1",
-      color: normalizeColorValue(colorEl?.value || "Black & White"),
-      duplex: (duplexEl?.value || "Yes")
-    };
-
-    const res = await postJson("/api/jobs", payload, { auth: true });
-    if (!res.ok) {
-      console.error("create job", res.data);
-      toast(`Create job failed (${res.status}).`, "error");
-      return;
-    }
-
-    // 4) Prepend to Job History immediately
-    const j = res.data; // row returned by your API
-    jobsTable.prepend(jobRow(j));
-
-    // 5) Clear file input & refresh quota (deduct pages)
-    if (fileEl) fileEl.value = "";
-    refreshQuota();
-
-    toast("File sent to print queue.", "success");
-  } catch (e) {
-    console.error(e);
-    toast(e.message || "Upload failed", "error");
-  } finally {
-    btn.disabled = false; btn.textContent = oldText;
-  }
-}
-
-// wire the Send button
-if (sendBtn) sendBtn.addEventListener("click", uploadAndCreateJob);
+// async function refreshJobs() {
+//   const res = await getJson("/api/jobs", { auth: true });
+//   if (!res.ok) return;
+//   jobsTable.innerHTML = "";
+//   for (const j of res.data) {
+//     const tr = document.createElement("tr");
+//     tr.innerHTML = `
+//       <td>${new Date(j.created_at).toLocaleString()}</td>
+//       <td>${j.file_name}</td>
+//       <td>${j.pages}</td>
+//       <td>${j.color ? "Color" : "B/W"} • ${j.duplex ? "Duplex" : "Simplex"}</td>
+//       <td>${j.status}</td>
+//       <td>${j.pickup_code || ""}</td>
+//     `;
+//     jobsTable.appendChild(tr);
+//   }
+// }
 
 // ---------- boot ----------
 (function init() {
