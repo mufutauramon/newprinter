@@ -153,7 +153,7 @@ subscribeBtn.addEventListener("click", async () => {
   const res = await postJson("/api/subscribe", { planName }, { auth: true });
   if (res.ok) {
     toast(`Subscription set to ${planName}.`, "success");
-    refreshQuota();
+    await refreshQuota(); // immediately show quota
   } else {
     toast(`Failed to update plan (${res.status}).`, "error");
     console.error("subscribe", res.data);
@@ -170,39 +170,57 @@ signOutBtn.addEventListener("click", () => {
 
 // ================= REMOTEPRINT NG: DASHBOARD WIRING =================
 
-// backend endpoints (your Azure Functions names)
+// backend endpoints
 const ENDPOINTS = {
-  me:        "/api/HttpMe",           // GET  -> quota/plan info
-  jobsList:  "/api/HttpJobsList",     // GET  -> [{...jobs}]
-  blobSas:   "/api/HttpBlobSas",      // POST -> { uploadUrl, blobUrlPublic, quotaId? }
-  jobsCreate:"/api/HttpJobsCreate",   // POST -> { jobId }
+  me:        "/api/HttpMe",           // GET  -> { email, subscription:{ pages_remaining, plan, quota_pages } }
+  jobsList:  "/api/HttpJobsList",     // GET  -> [{...jobs}]  (kept as-is; adjust if needed)
+  blobSas:   "/api/HttpBlobSas",      // POST -> { uploadUrl, blobUrl, blobName }
+  jobsCreate:"/api/HttpJobsCreate",   // POST -> { jobId }    (assumed)
   price:     "/api/HttpPrice"         // POST -> { priceNaira }  (optional)
 };
 
-// ---- QUOTA ----
+// ---- QUOTA (adapts to HttpMe shape) ----
 async function refreshQuota() {
   const res = await getJson(ENDPOINTS.me, { auth: true });
-  if (!res.ok) return;
+  if (!res.ok) {
+    console.error("HttpMe error", res.status, res.data);
+    planNameEl.textContent = "—";
+    remainingEl.textContent = "0";
+    quotaFill.style.width = "0%";
+    return;
+  }
 
   const d = res.data || {};
-  const planName  = d.planName || d.plan || "—";
-  const total     = d.pages_total ?? d.total ?? 0;
-  const used      = d.pages_used ?? d.used ?? 0;
-  const reserved  = d.pages_reserved ?? d.reserved ?? 0;
-  const remaining = d.available ?? d.remaining ?? Math.max(0, total - used - reserved);
+  const sub = d.subscription || null;
+
+  if (!sub) {
+    planNameEl.textContent = "—";
+    remainingEl.textContent = "0";
+    quotaFill.style.width = "0%";
+    // helpful hint so you know what's missing
+    toast("No active subscription/quota for this account.", "info");
+    return;
+  }
+
+  const planName  = sub.plan || "—";
+  const total     = Number(sub.quota_pages ?? 0);
+  const remaining = Number(sub.pages_remaining ?? 0);
 
   planNameEl.textContent  = planName;
   remainingEl.textContent = String(remaining);
   const pct = total ? Math.max(0, Math.min(100, Math.round((remaining / total) * 100))) : 0;
   quotaFill.style.width = pct + "%";
 
-  window.__quota = d; // keep if quota_id etc. are returned
+  window.__quota = { planName, total, remaining }; // stash if needed later
 }
 
-// ---- JOBS ----
+// ---- JOBS (kept generic; adjust if your list differs) ----
 async function refreshJobs() {
   const res = await getJson(ENDPOINTS.jobsList, { auth: true });
-  if (!res.ok) return;
+  if (!res.ok) {
+    console.error("HttpJobsList error", res.status, res.data);
+    return;
+  }
 
   const list = Array.isArray(res.data) ? res.data : (res.data.jobs || []);
   jobsTable.innerHTML = "";
@@ -252,15 +270,19 @@ async function sendToPrint() {
     const isColor  = $("#color").value === "color";
     const isDuplex = $("#duplex").value === "true";
 
-    // 1) ask backend for SAS
+    // 1) ask backend for SAS — your API expects fileName/contentType
     const r1 = await postJson(ENDPOINTS.blobSas, {
-      filename: file.name,
-      contentType: file.type || "application/octet-stream",
-      pagesEstimate: pages
+      fileName: file.name,
+      contentType: file.type || "application/octet-stream"
     }, { auth: true });
 
-    if (!r1.ok) { toast(r1.data?.error || "Could not get upload URL.", "error"); return; }
-    const { uploadUrl, blobUrlPublic, quotaId } = r1.data;
+    if (!r1.ok) {
+      console.error("HttpBlobSas error", r1.status, r1.data);
+      toast(r1.data?.error || r1.data?.message || `Could not get upload URL (status ${r1.status})`, "error");
+      if (r1.status === 401) { localStorage.removeItem("rp_token"); localStorage.removeItem("rp_email"); setSignedIn(null); }
+      return;
+    }
+    const { uploadUrl, blobUrl /* read SAS */, blobName } = r1.data;
 
     // 2) upload to Blob
     const put = await fetch(uploadUrl, {
@@ -268,18 +290,21 @@ async function sendToPrint() {
       headers: { "x-ms-blob-type": "BlockBlob", "content-type": file.type || "application/octet-stream" },
       body: file
     });
-    if (!put.ok) throw new Error("Upload to storage failed.");
+    if (!put.ok) throw new Error(`Upload to storage failed (status ${put.status})`);
 
-    // 3) confirm job
+    // 3) confirm job — assuming your HttpJobsCreate accepts these fields
     const r2 = await postJson(ENDPOINTS.jobsCreate, {
-      quotaId,
-      blobUrl: blobUrlPublic,
+      blobUrl,                 // <-- use the read-enabled URL from your API
       filename: file.name,
       pages,
       meta: { color: isColor, duplex: isDuplex, copies: 1 }
     }, { auth: true });
 
-    if (!r2.ok) { toast(r2.data?.error || "Unable to queue job.", "error"); return; }
+    if (!r2.ok) {
+      console.error("HttpJobsCreate error", r2.status, r2.data);
+      toast(r2.data?.error || r2.data?.message || "Unable to queue job.", "error");
+      return;
+    }
 
     toast("Uploaded and queued.", "success");
     await refreshQuota();
