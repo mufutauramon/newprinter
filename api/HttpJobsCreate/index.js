@@ -1,7 +1,6 @@
 // api/HttpJobsCreate/index.js
-import { getUser } from "../lib/jwt.js";         // <— same style as HttpMe
-// If you’ll add SQL later, you can import here:
-// import { getPool, getSql } from "../../lib/sql.js";
+import { getUser } from "../lib/jwt.js";   // same pattern as HttpMe
+// import { getPool, getSql } from "../../lib/sql.js"; // for later DB insert
 
 function safeReply(context, status, stage, body) {
   context.res = {
@@ -10,68 +9,62 @@ function safeReply(context, status, stage, body) {
     body: JSON.stringify(body ?? {}),
   };
 }
-
-function pickFirst(...vals) {
-  for (const v of vals) if (v !== undefined && v !== null && v !== "") return v;
-  return undefined;
-}
+const pick = (...vals) => vals.find(v => v !== undefined && v !== null && v !== "");
 
 export default async function (context, req) {
-  // ---- Stage 0: read + normalize body
   const b = req.body || {};
-  const fileName = pickFirst(b.fileName, b.file_name, b.filename);
-  const blobUrl  = pickFirst(b.blobUrl, b.blob_url, b.url, b.readUrl);
-  const pagesRaw = pickFirst(b.pages, b.pagesEstimate, b.page_count);
-  const colorRaw = pickFirst(b.color, b.colour, (b.meta && b.meta.color));
-  const duplexRaw= pickFirst(b.duplex, (b.meta && b.meta.duplex));
 
-  // Probe/echo for tiny bodies (keeps your helpful dev behavior)
-  const looksLikeProbe =
-    !fileName && !blobUrl && (b.ping || Object.keys(b).length <= 2);
-  if (looksLikeProbe) {
-    safeReply(context, 200, "echo-v2", { ok: true, method: req.method, echo: b });
-    return;
-  }
+  // ---- Normalize incoming body (accept multiple key variants)
+  const fileName = pick(b.fileName, b.file_name, b.filename);
+  const blobUrl  = pick(b.blobUrl, b.blob_url, b.url, b.readUrl);
+  const pagesRaw = pick(b.pages, b.pagesEstimate, b.page_count);
+  const colorRaw = pick(b.color, b.colour, b?.meta?.color);
+  const duplexRaw= pick(b.duplex, b?.meta?.duplex);
 
-  // ---- Stage 1: auth (same approach as HttpMe)
+  // Tiny probe support for quick pings
+  const looksLikeProbe = !fileName && !blobUrl && (b.ping || Object.keys(b).length <= 2);
+  if (looksLikeProbe) return safeReply(context, 200, "echo-v2", { ok: true, method: req.method, echo: b });
+
+  // ---- Auth (strict by default; optional if feature-flag is set)
+  const authOptional = process.env.JOBS_AUTH_OPTIONAL === "1";
   let user;
   try {
-    user = getUser(req); // must throw if invalid/missing
+    user = getUser(req); // { id, email, ... } — must throw if invalid
   } catch (e) {
-    safeReply(context, 401, "auth-v1", { error: "auth_failed", detail: "invalid_token" });
-    return;
+    if (!authOptional) {
+      return safeReply(context, 401, "auth-v1", { error: "auth_failed", detail: "invalid_token" });
+    }
+    // Dev fallback user so you can keep testing
+    user = {
+      id: req.headers["x-dev-user-id"] || "dev-user",
+      email: req.headers["x-dev-user-email"] || "dev@local",
+      dev_mode: true
+    };
   }
 
-  // ---- Stage 2: validate payload
+  // ---- Validate payload
   const pages = Number(pagesRaw);
   if (!fileName || !blobUrl || !Number.isFinite(pages) || pages <= 0) {
-    safeReply(context, 400, "validate-v1", {
+    return safeReply(context, 400, "validate-v1", {
       error: "bad_request",
       detail: "fileName, blobUrl, pages (number > 0) are required",
       got: { fileName, blobUrl, pages: pagesRaw }
     });
-    return;
   }
 
-  // ---- Stage 3: normalize options
+  // ---- Normalize options
   const normColor = (() => {
     const s = String(colorRaw ?? "").toLowerCase();
-    // accepts "color", true-like strings, or 1
-    if (s.includes("color") || s === "true" || s === "1") return 1;
-    return 0;
+    return (s.includes("color") || s === "true" || s === "1") ? 1 : 0;
   })();
-
   const normDuplex = (() => {
     const s = String(duplexRaw ?? "").toLowerCase();
-    // accepts "yes", "true", "1"
-    if (s.startsWith("y") || s === "true" || s === "1") return 1;
-    return 0;
+    return (s.startsWith("y") || s === "true" || s === "1") ? 1 : 0;
   })();
 
-  // ---- Stage 4: (placeholder) create/queue job
-  // Replace this with your SQL insert later.
+  // ---- Placeholder job (swap with SQL insert later)
   const job = {
-    id: Date.now(), // placeholder
+    id: Date.now(),
     user_id: user.id,
     file_name: fileName,
     storage_url: blobUrl,
@@ -81,7 +74,8 @@ export default async function (context, req) {
     status: "queued",
     pickup_code: null,
     created_at: new Date().toISOString(),
+    dev_mode: !!user.dev_mode
   };
 
-  safeReply(context, 201, "job-created-v1", { ok: true, job });
+  return safeReply(context, 201, "job-created-v1", { ok: true, job });
 }
