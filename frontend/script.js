@@ -23,7 +23,7 @@ async function postJson(url, body = {}, { auth = false } = {}) {
   const text = await r.text();
   let data = {};
   try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
-  return { ok: r.ok, status: r.status, data };
+  return { ok: r.ok, status: r.status, data, url };
 }
 
 async function getJson(url, { auth = false } = {}) {
@@ -36,8 +36,11 @@ async function getJson(url, { auth = false } = {}) {
   const text = await r.text();
   let data = {};
   try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
-  return { ok: r.ok, status: r.status, data };
+  return { ok: r.ok, status: r.status, data, url };
 }
+
+// Optionally set window.API_BASE = "https://<your-site>" if functions are separate
+const API_BASE = (typeof window !== "undefined" && window.API_BASE) ? window.API_BASE : "";
 
 // ---------- UI state ----------
 function setSignedIn(email) {
@@ -109,7 +112,7 @@ signupSubmit.addEventListener("click", async () => {
   if (!fullName || !phone)   return toast("Please provide full name and phone.", "info");
   if (!email || !password)   return toast("Email and password are required.", "info");
 
-  const res = await postJson("/api/auth/signup", { fullName, phone, email, password, plan });
+  const res = await postJson(`${API_BASE}/api/auth/signup`, { fullName, phone, email, password, plan });
   if (res.ok) {
     localStorage.setItem("rp_email", email);
     localStorage.setItem("rp_token", res.data.token || "");
@@ -130,7 +133,7 @@ signInBtn.addEventListener("click", async () => {
   const password = pwdEl.value;
   if (!email || !password) return toast("Enter email and password.", "info");
 
-  const res = await postJson("/api/auth/login", { email, password });
+  const res = await postJson(`${API_BASE}/api/auth/login`, { email, password });
   if (res.ok) {
     localStorage.setItem("rp_email", email);
     localStorage.setItem("rp_token", res.data.token || "");
@@ -150,7 +153,7 @@ subscribeBtn.addEventListener("click", async () => {
   if (!token) return toast("Please sign in first.", "info");
 
   const planName = currentPlan();
-  const res = await postJson("/api/subscribe", { planName }, { auth: true });
+  const res = await postJson(`${API_BASE}/api/subscribe`, { planName }, { auth: true });
   if (res.ok) {
     toast(`Subscription set to ${planName}.`, "success");
     await refreshQuota(); // immediately show quota
@@ -170,13 +173,11 @@ signOutBtn.addEventListener("click", () => {
 
 // ================= REMOTEPRINT NG: DASHBOARD WIRING =================
 
-// backend endpoints
+// backend endpoints (base is prefixed with API_BASE; SAS path is auto-discovered)
 const ENDPOINTS = {
-  me:        "/api/HttpMe",           // GET  -> { email, subscription:{ pages_remaining, plan, quota_pages } }
-  jobsList:  "/api/HttpJobsList",     // GET  -> [{...jobs}]  (kept as-is; adjust if needed)
-  blobSas:   "/api/HttpBlobSas",      // POST -> { uploadUrl, blobUrl, blobName }
-  jobsCreate:"/api/HttpJobsCreate",   // POST -> { jobId }    (assumed)
-  price:     "/api/HttpPrice"         // POST -> { priceNaira }  (optional)
+  me:        `${API_BASE}/api/HttpMe`,           // GET  -> { email, subscription:{ pages_remaining, plan, quota_pages } }
+  jobsList:  `${API_BASE}/api/HttpJobsList`,     // GET  -> [{...jobs}]
+  price:     `${API_BASE}/api/HttpPrice`         // POST -> { priceNaira }  (optional)
 };
 
 // ---- QUOTA (adapts to HttpMe shape) ----
@@ -197,7 +198,6 @@ async function refreshQuota() {
     planNameEl.textContent = "—";
     remainingEl.textContent = "0";
     quotaFill.style.width = "0%";
-    // helpful hint so you know what's missing
     toast("No active subscription/quota for this account.", "info");
     return;
   }
@@ -211,10 +211,10 @@ async function refreshQuota() {
   const pct = total ? Math.max(0, Math.min(100, Math.round((remaining / total) * 100))) : 0;
   quotaFill.style.width = pct + "%";
 
-  window.__quota = { planName, total, remaining }; // stash if needed later
+  window.__quota = { planName, total, remaining };
 }
 
-// ---- JOBS (kept generic; adjust if your list differs) ----
+// ---- JOBS (generic) ----
 async function refreshJobs() {
   const res = await getJson(ENDPOINTS.jobsList, { auth: true });
   if (!res.ok) {
@@ -258,6 +258,46 @@ $("#priceBtn")?.addEventListener("click", async () => {
   }
 });
 
+// ---- SAS endpoint auto-discovery (fixes 404 from casing/route differences) ----
+async function getBlobSas(file) {
+  const candidates = [
+    `${API_BASE}/api/HttpBlobSas`,
+    `${API_BASE}/api/httpblobsas`,
+    `${API_BASE}/api/HttpBlobSAS`,
+    `${API_BASE}/api/BlobSas`,
+    `${API_BASE}/api/BlobSAS`,
+    `${API_BASE}/api/blob-sas`,
+  ];
+  const body = {
+    fileName: file.name,
+    contentType: file.type || "application/octet-stream"
+  };
+
+  let lastErr = null;
+  for (const url of candidates) {
+    const res = await postJson(url, body, { auth: true });
+    if (res.ok && res.data?.uploadUrl) {
+      // Found the working route
+      if (url !== `${API_BASE}/api/HttpBlobSas`) {
+        console.warn("Using SAS endpoint:", url);
+      }
+      return { ok: true, ...res.data };
+    }
+    // If 404, keep trying; if other error, surface it
+    if (res.status !== 404) {
+      lastErr = res;
+      break;
+    }
+    lastErr = res;
+  }
+
+  if (lastErr) {
+    console.error("SAS discovery failed", lastErr.status, lastErr.data, "tried:", candidates);
+    toast(lastErr.data?.error || lastErr.data?.message || `Could not get upload URL (status ${lastErr.status})`, "error");
+  }
+  return { ok: false };
+}
+
 // ---- Upload: get SAS → PUT blob → confirm ----
 async function sendToPrint() {
   try {
@@ -270,19 +310,10 @@ async function sendToPrint() {
     const isColor  = $("#color").value === "color";
     const isDuplex = $("#duplex").value === "true";
 
-    // 1) ask backend for SAS — your API expects fileName/contentType
-    const r1 = await postJson(ENDPOINTS.blobSas, {
-      fileName: file.name,
-      contentType: file.type || "application/octet-stream"
-    }, { auth: true });
-
-    if (!r1.ok) {
-      console.error("HttpBlobSas error", r1.status, r1.data);
-      toast(r1.data?.error || r1.data?.message || `Could not get upload URL (status ${r1.status})`, "error");
-      if (r1.status === 401) { localStorage.removeItem("rp_token"); localStorage.removeItem("rp_email"); setSignedIn(null); }
-      return;
-    }
-    const { uploadUrl, blobUrl /* read SAS */, blobName } = r1.data;
+    // 1) get SAS (auto-discover correct route)
+    const sas = await getBlobSas(file);
+    if (!sas.ok) return; // toast already shown
+    const { uploadUrl, blobUrl /* read SAS */, blobName } = sas;
 
     // 2) upload to Blob
     const put = await fetch(uploadUrl, {
@@ -292,12 +323,13 @@ async function sendToPrint() {
     });
     if (!put.ok) throw new Error(`Upload to storage failed (status ${put.status})`);
 
-    // 3) confirm job — assuming your HttpJobsCreate accepts these fields
-    const r2 = await postJson(ENDPOINTS.jobsCreate, {
-      blobUrl,                 // <-- use the read-enabled URL from your API
+    // 3) confirm job — adjust if your HttpJobsCreate expects different keys
+    const r2 = await postJson(`${API_BASE}/api/HttpJobsCreate`, {
+      blobUrl,                 // use read-enabled URL provided by SAS API
       filename: file.name,
       pages,
-      meta: { color: isColor, duplex: isDuplex, copies: 1 }
+      meta: { color: isColor, duplex: isDuplex, copies: 1 },
+      blobName                 // included in case your backend wants it
     }, { auth: true });
 
     if (!r2.ok) {
