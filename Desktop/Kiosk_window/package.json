@@ -1,0 +1,14 @@
+{
+  "name": "remoteprint-kiosk-agent-win",
+  "version": "1.0.0",
+  "description": "Windows Kiosk Print Agent for RemotePrint",
+  "main": "agent-win.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node agent-win.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "node-fetch": "^3.3.2"
+  }
+}
