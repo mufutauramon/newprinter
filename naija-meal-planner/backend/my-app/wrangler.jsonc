@@ -1,0 +1,12 @@
+{
+  "name": "naija-meal-planner-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-01-01",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "naija_meal_planner_db",
+      "database_id": "d4504fc6-e657-4328-a47e-504af698a74f"
+    }
+  ]
+}

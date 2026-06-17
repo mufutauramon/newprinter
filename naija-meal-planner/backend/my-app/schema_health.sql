@@ -1,0 +1,36 @@
+CREATE TABLE IF NOT EXISTS meal_checkins (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  meal_day INTEGER NOT NULL,
+  meal_type TEXT NOT NULL,
+  meal_name TEXT,
+  status TEXT NOT NULL,
+  custom_meal TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(user_id, meal_day, meal_type)
+);
+
+CREATE TABLE IF NOT EXISTS health_scores (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  score INTEGER NOT NULL,
+  calories INTEGER DEFAULT 0,
+  protein INTEGER DEFAULT 0,
+  carbs INTEGER DEFAULT 0,
+  fat INTEGER DEFAULT 0,
+  score_date TEXT NOT NULL,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(user_id, score_date)
+);
+
+CREATE TABLE IF NOT EXISTS water_tracking (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  glasses INTEGER DEFAULT 0,
+  tracking_date TEXT NOT NULL,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(user_id, tracking_date)
+);
