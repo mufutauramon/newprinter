@@ -41,3 +41,16 @@ app-example
 # generated native folders
 /ios
 /android
+node_modules
+.expo
+dist
+build
+android
+ios
+.DS_Store
+*.log
+.env
+.env.*
+
+# Google/Firebase server credentials - NEVER commit
+fcm-v1-service-account.json

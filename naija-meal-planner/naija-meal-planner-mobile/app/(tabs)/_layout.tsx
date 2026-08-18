@@ -10,10 +10,11 @@ export default function TabLayout() {
       }}
     >
       <Tabs.Screen name="index" />
-      <Tabs.Screen name="meals" />
-      <Tabs.Screen name="prices" />
-      <Tabs.Screen name="groceries" />
-      <Tabs.Screen name="settings" />
+<Tabs.Screen name="meals" />
+<Tabs.Screen name="prices" />
+<Tabs.Screen name="groceries" />
+<Tabs.Screen name="community" />
+<Tabs.Screen name="settings" />
     </Tabs>
   );
 }

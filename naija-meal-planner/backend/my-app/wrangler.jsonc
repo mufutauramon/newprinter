@@ -2,11 +2,40 @@
   "name": "naija-meal-planner-api",
   "main": "src/index.ts",
   "compatibility_date": "2026-01-01",
+
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "naija_meal_planner_db",
       "database_id": "d4504fc6-e657-4328-a47e-504af698a74f"
     }
-  ]
+  ],
+
+  "r2_buckets": [
+    {
+      "bucket_name": "naija-meal-images",
+      "binding": "naija_meal_images",
+      "remote": true
+    }
+  ],
+
+  "env": {
+    "staging": {
+      "name": "naija-meal-planner-api-staging",
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "naija_meal_planner_db_staging",
+          "database_id": "b1167cbe-0a3d-4ef0-af7c-a7aef1a69c91"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "naija_meal_images",
+          "bucket_name": "naija-meal-images",
+          "remote": true
+        }
+      ]
+    }
+  }
 }

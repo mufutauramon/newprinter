@@ -4,116 +4,131 @@ import {
   ScrollView,
   View,
   Text,
-  TextInput,
-  Switch,
   Pressable,
   StyleSheet,
   Alert,
 } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { checkIsPro } from "../../lib/purchases";
 
-export default function Settings() {
-  const {
-  familySize,
-  setFamilySize,
-  region,
-  showFruit,
-  setShowFruit,
-  showAppetizer,
-  setShowAppetizer,
-  planDays,
-  setPlanDays,
-  user,
-  signOut,
-  startDay,
-setStartDay,
-} = useAppContext();
-  const saveSettings = () => {
-    Alert.alert("Saved", "Your settings have been saved.");
+export default function More() {
+  const { user, signOut, region } = useAppContext();
+  const isAdmin =
+  String(user?.email || "").toLowerCase() === "amufutau@unilag.edu.ng";
+
+  const handleSignOut = () => {
+    Alert.alert("Sign out", "Do you want to sign out?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Sign Out",
+        style: "destructive",
+        onPress: async () => {
+          await signOut();
+          router.replace("/signin");
+        },
+      },
+    ]);
   };
 
-  const handleSignOut = async () => {
-    await signOut();
-    router.replace("/signin");
+  const openHealthInsights = async () => {
+    const isPro = await checkIsPro();
+
+    if (!isPro) {
+      router.push("/paywall");
+      return;
+    }
+
+    router.push("/health-insights");
   };
+
+  const regionLabel =
+    region === "ng"
+      ? "Nigeria"
+      : region === "ca"
+      ? "Canada"
+      : region === "uk"
+      ? "United Kingdom"
+      : region === "au"
+      ? "Australia"
+      : "United States";
 
   return (
-    <ScrollView style={styles.container}>
-      <Text style={styles.title}>Settings</Text>
-      <Text style={styles.subtitle}>Customize your meal planner.</Text>
-
-      {user && (
-        <View style={styles.card}>
-          <Text style={styles.optionTitle}>{user.name}</Text>
-          <Text style={styles.optionSub}>{user.email}</Text>
+    <ScrollView
+      style={styles.screen}
+      contentContainerStyle={styles.content}
+      showsVerticalScrollIndicator={false}
+    >
+      <View style={styles.hero}>
+        <View style={styles.avatar}>
+          <Text style={styles.avatarText}>
+            {(user?.name || "N").charAt(0).toUpperCase()}
+          </Text>
         </View>
-      )}
 
-      <View style={styles.card}>
-        <Text style={styles.label}>Family Size</Text>
-        <TextInput
-          style={styles.input}
-          value={familySize}
-          onChangeText={setFamilySize}
-          keyboardType="numeric"
+        <View>
+          <Text style={styles.name}>{user?.name || "Guest User"}</Text>
+          <Text style={styles.email}>{user?.email || "Not signed in"}</Text>
+          <Text style={styles.region}>Region: {regionLabel}</Text>
+        </View>
+      </View>
+
+      <View style={styles.menuCard}>
+        <MenuRow
+          icon="calendar-outline"
+          title="Meal Plan Settings"
+          subtitle="Family size, plan days, start day"
+          onPress={() => router.push("/meal-settings")}
         />
-        <Text style={styles.label}>Plan Days</Text>
-<TextInput
-  style={styles.input}
-  value={planDays}
-  onChangeText={setPlanDays}
-  keyboardType="numeric"
-  placeholder="e.g. 7, 14, 30"
-/>
-<Text style={styles.label}>Start Day</Text>
-<TextInput
-  style={styles.input}
-  value={startDay}
-  onChangeText={setStartDay}
-  keyboardType="numeric"
-  placeholder="e.g. 1, 8, 15"
-/>
 
-        <Text style={styles.label}>Detected Region</Text>
+        <MenuRow
+          icon="notifications-outline"
+          title="Preferences & Reminders"
+          subtitle="Fruit plan, appetizer, meal reminders"
+          onPress={() => router.push("/preferences")}
+        />
 
-<View style={styles.detectedRegionBox}>
-  <Text style={styles.detectedRegionText}>
-    {region === "ng"
-      ? "🇳🇬 Nigeria"
-      : region === "ca"
-      ? "🇨🇦 Canada"
-      : "🇺🇸 United States"}
-  </Text>
-</View>
+        <MenuRow
+          icon="fitness-outline"
+          title="Health Insights"
+          subtitle="Weekly nutrition and meal balance"
+          onPress={openHealthInsights}
+        />
+
+                <MenuRow
+          icon="person-circle-outline"
+          title="Edit Profile Photo"
+          subtitle="Add or update your community avatar"
+          onPress={() => router.push("/edit-profile")}
+        />
+
+        <MenuRow
+          icon="bookmark-outline"
+          title="Saved Posts"
+          subtitle="View recipes and posts you saved"
+          onPress={() => router.push("/saved-posts")}
+        />
+
+        <MenuRow
+          icon="chatbubble-ellipses-outline"
+          title="Send Feedback"
+          subtitle="Share bugs, ideas, or suggestions"
+          onPress={() => router.push("/feedback")}
+        />
+{isAdmin && (
+  <MenuRow
+    icon="speedometer-outline"
+    title="Admin Dashboard"
+    subtitle="Users, feedback, and growth metrics"
+    onPress={() => router.push("/admin")}
+  />
+)}
+        <MenuRow
+          icon="document-text-outline"
+          title="Legal & Support"
+          subtitle="Privacy, terms, contact, delete account"
+          onPress={() => router.push("/legal-support")}
+        />
       </View>
-
-      <View style={styles.card}>
-        <View style={styles.switchRow}>
-          <View>
-            <Text style={styles.optionTitle}>Fruit Plan</Text>
-            <Text style={styles.optionSub}>Separate fruit/snack from meals</Text>
-          </View>
-
-          <Switch value={showFruit} onValueChange={setShowFruit} />
-        </View>
-
-        <View style={styles.divider} />
-
-        <View style={styles.switchRow}>
-          <View>
-            <Text style={styles.optionTitle}>Appetizer</Text>
-            <Text style={styles.optionSub}>Add optional starter section</Text>
-          </View>
-
-          <Switch value={showAppetizer} onValueChange={setShowAppetizer} />
-        </View>
-      </View>
-
-      <Pressable style={styles.saveBtn} onPress={saveSettings}>
-        <Text style={styles.saveText}>Save Settings</Text>
-      </Pressable>
-<Pressable style={styles.proBtn} onPress={() => router.push("/paywall")}>
-  <Text style={styles.proText}>🚀 Upgrade / Manage Pro</Text>
-</Pressable>
       <Pressable style={styles.logoutBtn} onPress={handleSignOut}>
         <Text style={styles.logoutText}>Sign Out</Text>
       </Pressable>
@@ -121,127 +136,129 @@ setStartDay,
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    padding: 20,
-    paddingBottom: 120,
-    backgroundColor: "#f4f8f5",
-  },
-  title: {
-    fontSize: 26,
-    fontWeight: "900",
-    color: "#0f172a",
-  },
-  detectedRegionBox: {
-  backgroundColor: "#ecfdf5",
-  padding: 14,
-  borderRadius: 14,
-  marginBottom: 14,
-},
+function MenuRow({
+  icon,
+  title,
+  subtitle,
+  onPress,
+}: {
+  icon: any;
+  title: string;
+  subtitle: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable style={styles.row} onPress={onPress}>
+      <View style={styles.iconBox}>
+        <Ionicons name={icon} size={22} color="#15803d" />
+      </View>
 
-detectedRegionText: {
-  color: "#166534",
-  fontWeight: "900",
-  fontSize: 15,
-},
-  subtitle: {
-    color: "#64748b",
-    marginTop: 6,
-    marginBottom: 18,
-  },
-  card: {
-    backgroundColor: "#fff",
-    padding: 18,
-    borderRadius: 22,
-    marginBottom: 16,
-  },
-  label: {
-    fontWeight: "800",
-    marginBottom: 6,
-    color: "#0f172a",
-  },
-  input: {
-    backgroundColor: "#f8fafc",
-    padding: 14,
-    borderRadius: 14,
-    marginBottom: 14,
-    fontSize: 15,
-  },
-  regionRow: {
-    flexDirection: "row",
-    gap: 10,
-  },
-  regionBtn: {
+      <View style={{ flex: 1 }}>
+        <Text style={styles.rowTitle}>{title}</Text>
+        <Text style={styles.rowSub}>{subtitle}</Text>
+      </View>
+
+      <Ionicons name="chevron-forward" size={22} color="#94a3b8" />
+    </Pressable>
+  );
+}
+
+const styles = StyleSheet.create({
+  screen: {
     flex: 1,
-    padding: 13,
-    borderRadius: 14,
-    backgroundColor: "#f1f5f9",
-    alignItems: "center",
+    backgroundColor: "#eef7f0",
   },
-  activeBtn: {
-    backgroundColor: "#0f172a",
+  content: {
+    padding: 20,
+    paddingTop: 55,
+    paddingBottom: 160,
   },
-  regionText: {
-    fontWeight: "800",
-    color: "#64748b",
-  },
-  activeText: {
-    fontWeight: "900",
-    color: "#fff",
-  },
-  switchRow: {
+  hero: {
+    backgroundColor: "#15803d",
+    borderRadius: 30,
+    padding: 22,
     flexDirection: "row",
-    justifyContent: "space-between",
-    gap: 16,
     alignItems: "center",
+    gap: 16,
+    marginBottom: 22,
   },
-  optionTitle: {
-    fontSize: 16,
+  avatar: {
+    width: 66,
+    height: 66,
+    borderRadius: 999,
+    backgroundColor: "#dcfce7",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  avatarText: {
+    color: "#14532d",
+    fontSize: 28,
     fontWeight: "900",
-    color: "#0f172a",
   },
-  optionSub: {
+  name: {
+    color: "#fff",
+    fontSize: 24,
+    fontWeight: "900",
+  },
+  email: {
+    color: "#dcfce7",
+    marginTop: 4,
+    fontWeight: "700",
+  },
+  region: {
+    color: "#bbf7d0",
+    marginTop: 5,
+    fontWeight: "800",
+    fontSize: 12,
+  },
+  menuCard: {
+    backgroundColor: "#fff",
+    borderRadius: 28,
+    overflow: "hidden",
+    shadowColor: "#0f172a",
+    shadowOpacity: 0.06,
+    shadowRadius: 18,
+    elevation: 3,
+  },
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+    padding: 18,
+    borderBottomWidth: 1,
+    borderBottomColor: "#e2e8f0",
+  },
+  iconBox: {
+    width: 46,
+    height: 46,
+    borderRadius: 16,
+    backgroundColor: "#f0fdf4",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  rowTitle: {
+    color: "#0f172a",
+    fontWeight: "900",
+    fontSize: 16,
+  },
+  rowSub: {
     color: "#64748b",
     marginTop: 4,
-  },
-  divider: {
-    height: 1,
-    backgroundColor: "#e2e8f0",
-    marginVertical: 16,
-  },
-  saveBtn: {
-    backgroundColor: "#0f7a43",
-    padding: 15,
-    borderRadius: 14,
-    alignItems: "center",
-    marginBottom: 12,
-  },
-  saveText: {
-    color: "#fff",
-    fontWeight: "900",
+    fontWeight: "700",
+    fontSize: 12,
   },
   logoutBtn: {
-    backgroundColor: "#fee2e2",
-    padding: 15,
-    borderRadius: 14,
+    marginTop: 22,
+    backgroundColor: "#fff1f2",
+    borderWidth: 1,
+    borderColor: "#fecdd3",
+    padding: 18,
+    borderRadius: 24,
     alignItems: "center",
-    marginBottom: 40,
   },
-  proBtn: {
-  backgroundColor: "#7c3aed",
-  padding: 15,
-  borderRadius: 14,
-  alignItems: "center",
-  marginBottom: 12,
-},
-
-proText: {
-  color: "#fff",
-  fontWeight: "900",
-},
   logoutText: {
-    color: "#991b1b",
+    color: "#be123c",
     fontWeight: "900",
+    fontSize: 16,
   },
 });

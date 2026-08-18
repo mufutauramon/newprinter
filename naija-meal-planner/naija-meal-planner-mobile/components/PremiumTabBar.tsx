@@ -1,14 +1,18 @@
-import { BlurView } from "expo-blur";
-import { Ionicons, MaterialIcons } from "@expo/vector-icons";
+import { View, Text, Pressable, StyleSheet } from "react-native";
 import { BottomTabBarProps } from "@react-navigation/bottom-tabs";
-import { Pressable, StyleSheet, Text, View } from "react-native";
-
-const icons: any = {
-  index: { type: "ion", active: "home", inactive: "home-outline", label: "Home" },
-  meals: { type: "material", active: "restaurant-menu", inactive: "restaurant-menu", label: "Meals" },
-  prices: { type: "ion", active: "cash", inactive: "cash-outline", label: "Prices" },
-  groceries: { type: "ion", active: "cart", inactive: "cart-outline", label: "Grocery" },
-  settings: { type: "ion", active: "settings", inactive: "settings-outline", label: "Settings" },
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { TabActions } from "@react-navigation/native";
+import { useEffect, useState } from "react";
+import { apiFetch } from "../utils/api";
+import { useAppContext } from "../context/AppContext";
+import { DeviceEventEmitter } from "react-native";
+const TAB_META: Record<string, { label: string; icon: string }> = {
+  index: { label: "Home", icon: "⌂" },
+  meals: { label: "Meals", icon: "🍽️" },
+  prices: { label: "Market", icon: "🏪" },
+  groceries: { label: "Grocery", icon: "🛒" },
+  community: { label: "Community", icon: "👥" },
+  settings: { label: "More", icon: "•••" },
 };
 
 export default function PremiumTabBar({
@@ -16,14 +20,57 @@ export default function PremiumTabBar({
   descriptors,
   navigation,
 }: BottomTabBarProps) {
+  const insets = useSafeAreaInsets();
+  const { user,token } = useAppContext();
+const [unreadCount, setUnreadCount] = useState(0);
+
+useEffect(() => {
+  const loadCount = async () => {
+    try {
+      if (!token) return;
+
+      const data = await apiFetch<any>(
+        "/api/community/notifications",
+        { token }
+      );
+
+      if (data.ok) {
+        setUnreadCount(Number(data.unreadCount || 0));
+      }
+    } catch (err) {
+      console.log("Notification count failed:", err);
+    }
+  };
+
+  loadCount();
+}, [user?.id, state.index, token]);
+useEffect(() => {
+  const sub = DeviceEventEmitter.addListener(
+    "communityNotificationsRead",
+    () => {
+      setUnreadCount(0);
+    }
+  );
+
+  return () => sub.remove();
+}, []);
   return (
-    <View style={styles.wrapper}>
-      <BlurView intensity={85} tint="light" style={styles.bar}>
+    <View
+      pointerEvents="box-none"
+      style={[
+        styles.wrapper,
+        { paddingBottom: Math.max(insets.bottom, 10) },
+      ]}
+    >
+      <View style={styles.bar} pointerEvents="auto">
         {state.routes.map((route, index) => {
           const focused = state.index === index;
-          const item = icons[route.name];
+          const meta = TAB_META[route.name] || {
+            label: route.name,
+            icon: "•",
+          };
 
-          if (!item) return null;
+          const { options } = descriptors[route.key];
 
           const onPress = () => {
             const event = navigation.emit({
@@ -32,38 +79,47 @@ export default function PremiumTabBar({
               canPreventDefault: true,
             });
 
-            if (!focused && !event.defaultPrevented) {
-              navigation.navigate(route.name);
+            if (!event.defaultPrevented) {
+              navigation.dispatch({
+                ...TabActions.jumpTo(route.name),
+                target: state.key,
+              });
             }
           };
-
-          const color = focused ? "#0f7a43" : "#94a3b8";
-
-          const Icon =
-            item.type === "material" ? MaterialIcons : Ionicons;
 
           return (
             <Pressable
               key={route.key}
+              accessibilityRole="button"
+              accessibilityState={focused ? { selected: true } : {}}
+              accessibilityLabel={options.tabBarAccessibilityLabel}
               onPress={onPress}
-              style={[styles.tabItem, focused && styles.activeTab]}
+              style={({ pressed }) => [
+                styles.tabItem,
+                focused && styles.activeTab,
+                pressed && { opacity: 0.7 },
+              ]}
             >
-              <Icon
-                name={focused ? item.active : item.inactive}
-                size={focused ? 24 : 22}
-                color={color}
-              />
+             <View style={styles.iconWrap}>
+  <Text style={[styles.icon, focused && styles.activeIcon]}>
+    {meta.icon}
+  </Text>
+
+  {route.name === "community" && unreadCount > 0 && (
+    <View style={styles.badge}>
+      <Text style={styles.badgeText}>
+        {unreadCount > 99 ? "99+" : unreadCount}
+      </Text>
+    </View>
+  )}
+</View>
               <Text style={[styles.label, focused && styles.activeLabel]}>
-                {item.label}
+                {meta.label}
               </Text>
             </Pressable>
           );
         })}
-      </BlurView>
-
-      <Pressable style={styles.fab}>
-        <Ionicons name="add" size={30} color="#fff" />
-      </Pressable>
+      </View>
     </View>
   );
 }
@@ -71,63 +127,84 @@ export default function PremiumTabBar({
 const styles = StyleSheet.create({
   wrapper: {
     position: "absolute",
-    left: 16,
-    right: 16,
-    bottom: 18,
-    height: 86,
-    justifyContent: "center",
+    left: 10,
+    right: 10,
+    bottom: 8,
+    zIndex: 99999,
+    elevation: 99999,
   },
+
   bar: {
-    height: 72,
-    borderRadius: 28,
-    overflow: "hidden",
-    backgroundColor: "rgba(255,255,255,0.82)",
+    backgroundColor: "rgba(255,255,255,0.98)",
+    borderRadius: 30,
+    paddingHorizontal: 6,
+    paddingTop: 8,
+    paddingBottom: 8,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-around",
+    justifyContent: "space-between",
     shadowColor: "#0f172a",
-    shadowOpacity: 0.18,
-    shadowRadius: 22,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 18,
+    shadowOpacity: 0.14,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 50,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.75)",
+    borderColor: "rgba(15,23,42,0.06)",
   },
+
   tabItem: {
     flex: 1,
-    height: 58,
+    minHeight: 56,
+    borderRadius: 20,
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: 22,
+    paddingHorizontal: 2,
   },
+
   activeTab: {
-    backgroundColor: "rgba(15,122,67,0.10)",
+    backgroundColor: "#e8f7ef",
   },
-  label: {
-    fontSize: 11,
+
+  icon: {
+    fontSize: 17,
+    marginBottom: 2,
     color: "#94a3b8",
-    fontWeight: "800",
-    marginTop: 3,
   },
-  activeLabel: {
+
+  activeIcon: {
     color: "#0f7a43",
   },
-  fab: {
-    position: "absolute",
-    alignSelf: "center",
-    top: -20,
-    width: 58,
-    height: 58,
-    borderRadius: 29,
-    backgroundColor: "#0f7a43",
-    alignItems: "center",
-    justifyContent: "center",
-    shadowColor: "#0f7a43",
-    shadowOpacity: 0.35,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 20,
-    borderWidth: 4,
-    borderColor: "#f4f8f5",
+
+  label: {
+    fontSize: 9,
+    fontWeight: "800",
+    color: "#94a3b8",
   },
+
+  activeLabel: {
+    color: "#0f7a43",
+    fontWeight: "900",
+  },
+  iconWrap: {
+  position: "relative",
+},
+
+badge: {
+  position: "absolute",
+  top: -8,
+  right: -14,
+  backgroundColor: "#dc2626",
+  minWidth: 18,
+  height: 18,
+  borderRadius: 9,
+  alignItems: "center",
+  justifyContent: "center",
+  paddingHorizontal: 4,
+},
+
+badgeText: {
+  color: "#fff",
+  fontSize: 10,
+  fontWeight: "900",
+},
 });

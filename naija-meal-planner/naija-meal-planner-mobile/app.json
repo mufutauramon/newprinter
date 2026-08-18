@@ -1,50 +1,87 @@
 {
   "expo": {
-    "name": "naija-meal-planner-mobile",
+    "name": "Naija Meal Planner",
     "slug": "naija-meal-planner-mobile",
-    "version": "1.0.0",
+    "version": "1.0.8",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "naijamealplannermobile",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.naijamealplanner.app",
+      "buildNumber": "108",
+
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSLocationWhenInUseUsageDescription": "Naija Meal Planner uses your location to show local grocery prices, nearby food stores, and region-based meal planning recommendations. For example, users in Lagos may see Nigerian market prices and nearby stores, while users in Houston may see U.S. prices and nearby grocery stores."
+      }
     },
     "android": {
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
+      "versionCode": 108,
+      "permissions": [
+        "NOTIFICATIONS",
+        "ACCESS_FINE_LOCATION"
+      ],
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.haneefah01.naijamealplannermobile"
+      "package": "com.naijamealplanner.app"
     },
     "web": {
       "output": "static",
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
-      "expo-router",
-      [
-        "expo-splash-screen",
-        {
-          "image": "./assets/images/splash-icon.png",
-          "imageWidth": 200,
-          "resizeMode": "contain",
-          "backgroundColor": "#ffffff",
-          "dark": {
-            "backgroundColor": "#000000"
-          }
-        }
-      ],
-      "expo-secure-store"
-    ],
+  "expo-router",
+  "expo-apple-authentication",
+  [
+    "@react-native-google-signin/google-signin",
+    {
+     "iosUrlScheme": "com.googleusercontent.apps.791528269537-tjm7cqppi6rjpdjn24n17hsacvkh4lbv"
+    }
+  ],
+  [
+    "expo-splash-screen",
+    {
+      "image": "./assets/images/splash-icon.png",
+      "imageWidth": 200,
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff",
+      "dark": {
+        "backgroundColor": "#000000"
+      }
+    }
+  ],
+  "expo-secure-store",
+  [
+    "expo-build-properties",
+    {
+      "ios": {
+        "useFrameworks": "static",
+        "deploymentTarget": "15.1"
+      }
+    }
+  ],
+  [
+    "expo-notifications",
+    {
+      "icon": "./assets/images/icon.png",
+      "color": "#15803d",
+      "defaultChannel": "community"
+    }
+  ],
+  "expo-video"
+],
     "experiments": {
-      "typedRoutes": true,
-      "reactCompiler": true
+      "typedRoutes": true
     },
     "extra": {
       "router": {},
